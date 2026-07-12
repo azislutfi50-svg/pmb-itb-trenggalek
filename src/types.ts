@@ -38,6 +38,7 @@ export interface Applicant {
     amount: number;
     status: "Pending" | "Paid";
     paidAt?: string;
+    buktiBayar?: DocumentInfo;
   };
   documents: {
     ijazah?: DocumentInfo;

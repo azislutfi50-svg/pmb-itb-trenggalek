@@ -175,14 +175,87 @@ const DEFAULT_MABA_ACCOUNTS = [
   { username: "indah", password: "indah123", name: "Indah Lestari", email: "indah.lestari@gmail.com", whatsapp: "084567890123", applicantId: "ITB-2026-0004" }
 ];
 
+const DEFAULT_CONTACTS = [
+  {
+    id: "contact-1",
+    name: "Rizky Pratama",
+    email: "rizky.pratama@gmail.com",
+    phone: "081234567891",
+    subject: "Kendala Pembayaran Virtual Account",
+    message: "Selamat siang Admin PMB ITB Trenggalek. Saya sudah mencoba membayar biaya pendaftaran melalui Virtual Account Bank BNI, namun status di dashboard pendaftaran saya masih pending. Mohon bantuan untuk memverifikasinya. Terima kasih.",
+    createdAt: "2026-07-11T09:15:00.000Z",
+    status: "Unread"
+  },
+  {
+    id: "contact-2",
+    name: "Dina Kartika",
+    email: "dina.kartika@yahoo.com",
+    phone: "085698765432",
+    subject: "Pertanyaan Batas Akhir Unggah Berkas",
+    message: "Halo, saya ingin bertanya untuk Gelombang III ini, batas akhir pengunggahan berkas administrasi seperti ijazah dan tanda tangan elektronik sampai tanggal berapa ya? Terima kasih banyak.",
+    createdAt: "2026-07-11T11:40:00.000Z",
+    status: "Responded"
+  }
+];
+
+const DEFAULT_FAQS = [
+  {
+    id: "faq-1",
+    question: "Bagaimana cara mendaftar sebagai mahasiswa baru di ITB Trenggalek?",
+    answer: "Pendaftaran dapat dilakukan sepenuhnya secara online melalui portal PMB ini. Pertama, klik tombol 'Daftar Sekarang' di Beranda untuk membuat akun. Setelah memiliki akun, silakan masuk ke Portal MABA untuk mengisi formulir pendaftaran, memilih program studi, membayar biaya pendaftaran, mengunggah berkas persyaratan, serta mengikuti ujian CBT dan tes minat bakat AI secara online.",
+    category: "Pendaftaran",
+    createdAt: "2026-07-11T12:00:00.000Z"
+  },
+  {
+    id: "faq-2",
+    question: "Berapa biaya pendaftaran dan bagaimana metode pembayarannya?",
+    answer: "Biaya pendaftaran untuk mahasiswa baru adalah Rp 250.000. Pembayaran dapat dilakukan secara aman melalui Transfer Virtual Account Bank BNI yang akan didapatkan setelah Anda membuat akun pendaftaran. Setelah membayar, silakan unggah bukti pembayaran di menu Pembayaran di dalam Portal MABA.",
+    category: "Biaya",
+    createdAt: "2026-07-11T12:05:00.000Z"
+  },
+  {
+    id: "faq-3",
+    question: "Apa saja program studi yang tersedia di ITB Trenggalek?",
+    answer: "ITB Trenggalek menawarkan tiga program studi Sarjana (S1) urusan yang sangat relevan dengan kebutuhan industri digital saat ini: S1 Bisnis Digital (E-Commerce, Digital Marketing, FinTech), S1 Manajemen Ritel (Retail Management, Supply Chain, Modern Store), dan S1 Ilmu Komputer (Software Engineering, AI & Machine Learning, Data Science).",
+    category: "Akademik",
+    createdAt: "2026-07-11T12:10:00.000Z"
+  },
+  {
+    id: "faq-4",
+    question: "Apakah tes minat bakat berbasis AI bersifat wajib?",
+    answer: "Ya, tes minat bakat berbasis AI merupakan salah satu inovasi di ITB Trenggalek untuk membantu merekomendasikan program studi yang paling cocok berdasarkan profil minat, kepribadian, serta preferensi masa depan Anda. Tes ini sangat mudah diakses di dalam portal dan hanya memakan waktu sekitar 5-10 menit.",
+    category: "Sistem Seleksi",
+    createdAt: "2026-07-11T12:15:00.000Z"
+  },
+  {
+    id: "faq-5",
+    question: "Apakah tersedia beasiswa bagi calon mahasiswa baru?",
+    answer: "Tentu saja! ITB Trenggalek menyediakan berbagai jalur beasiswa menarik, mulai dari Beasiswa KIP Kuliah (untuk mahasiswa kurang mampu yang berprestasi), Beasiswa Prestasi Akademik & Non-Akademik, Beasiswa Kemitraan Daerah, hingga Beasiswa Khusus Gelombang I. Informasi dan pendaftaran beasiswa dapat diakses setelah kelulusan seleksi administrasi.",
+    category: "Beasiswa",
+    createdAt: "2026-07-11T12:20:00.000Z"
+  }
+];
+
 // Helper to load or initialize DB
 function readDatabase() {
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, "utf-8");
       const data = JSON.parse(raw);
+      let updated = false;
       if (!data.mabaAccounts) {
         data.mabaAccounts = DEFAULT_MABA_ACCOUNTS;
+        updated = true;
+      }
+      if (!data.contacts) {
+        data.contacts = DEFAULT_CONTACTS;
+        updated = true;
+      }
+      if (!data.faqs) {
+        data.faqs = DEFAULT_FAQS;
+        updated = true;
+      }
+      if (updated) {
         saveDatabase(data);
       }
       return data;
@@ -194,7 +267,9 @@ function readDatabase() {
   const initialData = { 
     applicants: DEFAULT_APPLICANTS, 
     notifications: DEFAULT_NOTIFICATIONS,
-    mabaAccounts: DEFAULT_MABA_ACCOUNTS
+    mabaAccounts: DEFAULT_MABA_ACCOUNTS,
+    contacts: DEFAULT_CONTACTS,
+    faqs: DEFAULT_FAQS
   };
   fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), "utf-8");
   return initialData;
@@ -335,6 +410,44 @@ app.post("/api/maba/login", (req, res) => {
   res.json({ account, applicant: applicant || null });
 });
 
+// B2. Maba Forgot Password
+app.post("/api/maba/forgot-password", (req, res) => {
+  const db = readDatabase();
+  const { searchKey } = req.body;
+
+  if (!searchKey) {
+    return res.status(400).json({ message: "Username atau Email wajib diisi." });
+  }
+
+  const account = db.mabaAccounts.find(
+    (acc: any) =>
+      acc.username.toLowerCase() === searchKey.trim().toLowerCase() ||
+      acc.email.toLowerCase() === searchKey.trim().toLowerCase()
+  );
+
+  if (!account) {
+    return res.status(404).json({ message: "Akun Maba dengan username atau email tersebut tidak ditemukan." });
+  }
+
+  // Send simulated notifications
+  const waMsg = `[PMB ITB Trenggalek] Pemulihan Akun Maba Anda\n\nNama: ${account.name}\nUsername: ${account.username}\nPassword Anda: ${account.password}\n\nSilakan masuk kembali menggunakan informasi ini.`;
+  sendSimulatedNotification(db, "WhatsApp", account.whatsapp, waMsg);
+
+  const emailMsg = `Subjek: Lupa Password Akun Maba ITB Trenggalek\n\nHalo ${account.name},\n\nKami menerima permintaan pemulihan akun Maba Anda.\n\nBerikut rincian akun Anda:\n- Username: ${account.username}\n- Password: ${account.password}\n\nSilakan masuk kembali ke portal PMB.\n\nSalam,\nPanitia PMB ITB Trenggalek`;
+  sendSimulatedNotification(db, "Email", account.email, emailMsg);
+
+  saveDatabase(db);
+
+  res.json({
+    success: true,
+    message: "Password Anda berhasil dipulihkan dan dikirim melalui WhatsApp & Email simulasi.",
+    username: account.username,
+    password: account.password,
+    email: account.email,
+    whatsapp: account.whatsapp
+  });
+});
+
 // C. Admin Login
 app.post("/api/admin/login", (req, res) => {
   const { username, password } = req.body;
@@ -442,6 +555,41 @@ app.post("/api/payment/simulate", (req, res) => {
   sendSimulatedNotification(db, "WhatsApp", applicant.whatsapp, waMsg);
 
   const emailMsg = `Subjek: Pembayaran PMB ITB Trenggalek Terkonfirmasi!\n\nHalo ${applicant.name},\n\nPembayaran biaya pendaftaran Anda telah berhasil diverifikasi.\n\nNomor Pendaftaran: ${applicant.id}\nStatus Pembayaran: LUNAS\n\nSilakan unggah berkas administrasi dan melakukan tanda tangan digital di portal pendaftaran.\n\nTerima kasih.`;
+  sendSimulatedNotification(db, "Email", applicant.email, emailMsg);
+
+  saveDatabase(db);
+  res.json(applicant);
+});
+
+// 4b. Upload payment receipt PDF
+app.post("/api/payment/upload", (req, res) => {
+  const db = readDatabase();
+  const { id, fileName, fileSize, base64 } = req.body;
+
+  if (!id || !fileName) {
+    return res.status(400).json({ message: "Data bukti pembayaran tidak lengkap." });
+  }
+
+  const applicant = db.applicants.find((a: any) => a.id.toLowerCase() === id.toLowerCase());
+  if (!applicant) {
+    return res.status(404).json({ message: "Pendaftar tidak ditemukan." });
+  }
+
+  applicant.payment.status = "Paid";
+  applicant.payment.paidAt = new Date().toISOString();
+  applicant.payment.buktiBayar = {
+    name: fileName,
+    size: fileSize || "Unknown size",
+    uploadedAt: new Date().toISOString(),
+    base64: base64 || null
+  };
+  applicant.status = "Paid";
+
+  // Trigger automated notification
+  const waMsg = `[PMB ITB Trenggalek] Berkas bukti pembayaran pendaftaran Anda (${fileName}) telah berhasil diunggah dan terverifikasi.\n\nStatus pendaftaran Anda kini: LUNAS.\nSilakan lanjutkan mengunggah dokumen persyaratan administrasi di portal pendaftaran Anda.`;
+  sendSimulatedNotification(db, "WhatsApp", applicant.whatsapp, waMsg);
+
+  const emailMsg = `Subjek: Bukti Pembayaran PMB ITB Trenggalek Diterima!\n\nHalo ${applicant.name},\n\nTerima kasih, bukti pembayaran pendaftaran Anda (${fileName}) telah berhasil diunggah.\n\nNomor Pendaftaran: ${applicant.id}\nStatus Pembayaran: LUNAS (PAID)\n\nSilakan masuk kembali ke portal untuk mengunggah berkas administrasi dan melakukan tanda tangan elektronik.\n\nSalam,\nPanitia PMB ITB Trenggalek`;
   sendSimulatedNotification(db, "Email", applicant.email, emailMsg);
 
   saveDatabase(db);
@@ -722,10 +870,190 @@ app.post("/api/admin/update-status", (req, res) => {
   res.json(applicant);
 });
 
+// 9b. View Document Inline
+app.get("/api/document-view", (req, res) => {
+  const db = readDatabase();
+  const { id, type } = req.query;
+
+  if (!id || !type) {
+    return res.status(400).send("Parameter id dan type wajib diisi.");
+  }
+
+  const applicant = db.applicants.find((a: any) => a.id.toLowerCase() === (id as string).toLowerCase());
+  if (!applicant) {
+    return res.status(404).send("Pendaftar tidak ditemukan.");
+  }
+
+  let doc: any = null;
+  if (type === "bukti_bayar") {
+    doc = applicant.payment?.buktiBayar;
+  } else if (type === "signature") {
+    if (applicant.signature) {
+      doc = {
+        name: `signature_${applicant.id}.png`,
+        base64: applicant.signature
+      };
+    }
+  } else if (type === "ijazah" || type === "ktp" || type === "foto") {
+    doc = applicant.documents?.[type as string];
+  }
+
+  if (!doc) {
+    return res.status(404).send("Dokumen belum diunggah atau tidak tersedia.");
+  }
+
+  if (!doc.base64) {
+    if (type === "foto" || type === "signature") {
+      const dummyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", `inline; filename="${doc.name || 'placeholder.png'}"`);
+      return res.send(dummyPng);
+    } else {
+      const dummyContent = `%PDF-1.4\n1 0 obj\n<<\n/Title (${doc.name || 'document'})\n/Author (PMB ITB Trenggalek)\n>>\nendobj\ntrailer\n<<\n/Root 1 0 R\n>>\n%%EOF`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${doc.name || 'placeholder.pdf'}"`);
+      return res.send(Buffer.from(dummyContent));
+    }
+  }
+
+  try {
+    const base64Str = doc.base64;
+    const matches = base64Str.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.*)$/);
+    if (matches) {
+      const mimeType = matches[1];
+      const dataBuffer = Buffer.from(matches[2], "base64");
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Disposition", `inline; filename="${doc.name || 'document'}"`);
+      return res.send(dataBuffer);
+    } else {
+      const dataBuffer = Buffer.from(base64Str, "base64");
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${doc.name || 'document'}"`);
+      return res.send(dataBuffer);
+    }
+  } catch (error) {
+    console.error("Error decoding document base64:", error);
+    return res.status(500).send("Gagal mengurai dokumen.");
+  }
+});
+
 // 10. Get all notifications log
 app.get("/api/notifications", (req, res) => {
   const db = readDatabase();
   res.json(db.notifications);
+});
+
+// 10b. Contacts / Consultations endpoints
+app.get("/api/contacts", (req, res) => {
+  const db = readDatabase();
+  res.json(db.contacts || []);
+});
+
+app.post("/api/contacts", (req, res) => {
+  const db = readDatabase();
+  if (!db.contacts) {
+    db.contacts = [];
+  }
+  const { name, email, phone, subject, message } = req.body;
+  if (!name || !email || !phone || !subject || !message) {
+    return res.status(400).json({ message: "Semua data formulir harus diisi." });
+  }
+  const newContact = {
+    id: `contact-${Date.now()}`,
+    name,
+    email,
+    phone,
+    subject,
+    message,
+    createdAt: new Date().toISOString(),
+    status: "Unread"
+  };
+  db.contacts.unshift(newContact);
+  saveDatabase(db);
+  res.status(201).json(newContact);
+});
+
+app.post("/api/contacts/update-status", (req, res) => {
+  const db = readDatabase();
+  const { id, status } = req.body;
+  if (!id || !status) {
+    return res.status(400).json({ message: "ID dan status wajib ditentukan." });
+  }
+  if (!db.contacts) {
+    db.contacts = [];
+  }
+  const contact = db.contacts.find((c: any) => c.id === id);
+  if (!contact) {
+    return res.status(404).json({ message: "Pesan tidak ditemukan." });
+  }
+  contact.status = status;
+  saveDatabase(db);
+  res.json(contact);
+});
+
+// 10c. FAQ management endpoints
+app.get("/api/faqs", (req, res) => {
+  const db = readDatabase();
+  res.json(db.faqs || []);
+});
+
+app.post("/api/faqs", (req, res) => {
+  const db = readDatabase();
+  if (!db.faqs) {
+    db.faqs = [];
+  }
+  const { question, answer, category } = req.body;
+  if (!question || !answer || !category) {
+    return res.status(400).json({ message: "Pertanyaan, jawaban, dan kategori harus diisi." });
+  }
+  const newFaq = {
+    id: `faq-${Date.now()}`,
+    question,
+    answer,
+    category,
+    createdAt: new Date().toISOString()
+  };
+  db.faqs.push(newFaq);
+  saveDatabase(db);
+  res.status(201).json(newFaq);
+});
+
+app.post("/api/faqs/update", (req, res) => {
+  const db = readDatabase();
+  const { id, question, answer, category } = req.body;
+  if (!id || !question || !answer || !category) {
+    return res.status(400).json({ message: "ID, pertanyaan, jawaban, dan kategori harus lengkap." });
+  }
+  if (!db.faqs) {
+    db.faqs = [];
+  }
+  const faq = db.faqs.find((f: any) => f.id === id);
+  if (!faq) {
+    return res.status(404).json({ message: "FAQ tidak ditemukan." });
+  }
+  faq.question = question;
+  faq.answer = answer;
+  faq.category = category;
+  saveDatabase(db);
+  res.json(faq);
+});
+
+app.post("/api/faqs/delete", (req, res) => {
+  const db = readDatabase();
+  const { id } = req.body;
+  if (!id) {
+    return res.status(400).json({ message: "ID FAQ wajib ditentukan." });
+  }
+  if (!db.faqs) {
+    db.faqs = [];
+  }
+  const initialLength = db.faqs.length;
+  db.faqs = db.faqs.filter((f: any) => f.id !== id);
+  if (db.faqs.length === initialLength) {
+    return res.status(404).json({ message: "FAQ tidak ditemukan." });
+  }
+  saveDatabase(db);
+  res.json({ message: "FAQ berhasil dihapus." });
 });
 
 // 11. Sahabat ITB Chat AI Endpoint

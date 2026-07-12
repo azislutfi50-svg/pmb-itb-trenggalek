@@ -18,6 +18,7 @@ import {
   Award,
   AlertTriangle,
   Upload,
+  Download,
   RefreshCw,
   TrendingUp,
   MapPin,
@@ -35,7 +36,12 @@ import {
   Mail,
   ArrowLeft,
   ArrowRight,
-  Cpu
+  Cpu,
+  MessageSquare,
+  Trash2,
+  Edit3,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import { Applicant, StudyProgram, ApplicantStatus } from "./types";
 import { CBT_QUESTIONS, INTEREST_QUESTIONS } from "./data/questions";
@@ -74,6 +80,7 @@ export default function App() {
   const [mabaPasswordLogin, setMabaPasswordLogin] = useState("");
   const [mabaLoginError, setMabaLoginError] = useState("");
   const [isLoggingInMaba, setIsLoggingInMaba] = useState(false);
+  const [showMabaPasswordLogin, setShowMabaPasswordLogin] = useState(false);
 
   // Maba Register Form State
   const [mabaUsernameReg, setMabaUsernameReg] = useState("");
@@ -87,6 +94,13 @@ export default function App() {
   const [mabaRegError, setMabaRegError] = useState("");
   const [isRegisteringMaba, setIsRegisteringMaba] = useState(false);
   const [mabaAuthTab, setMabaAuthTab] = useState<"login" | "register">("login");
+  const [showMabaPasswordReg, setShowMabaPasswordReg] = useState(false);
+
+  // Forgot Password State
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotSearchKey, setForgotSearchKey] = useState("");
+  const [forgotStatus, setForgotStatus] = useState<{ type: "success" | "error"; text: string; password?: string } | null>(null);
+  const [isSubmittingForgot, setIsSubmittingForgot] = useState(false);
 
   // Admin Login Form State
   const [adminUsernameInput, setAdminUsernameInput] = useState("");
@@ -136,12 +150,50 @@ export default function App() {
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({});
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
+  // Graduation Search State
+  const [searchGradId, setSearchGradId] = useState("");
+  const [gradSearchResult, setGradSearchResult] = useState<Applicant | null>(null);
+  const [gradSearchError, setGradSearchError] = useState("");
+  const [isSearchingGrad, setIsSearchingGrad] = useState(false);
+
   // Signature Pad State
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
 
   // Admin Dashboard State
+  interface ContactMessage {
+    id: string;
+    name: string;
+    email: string;
+    phone: string;
+    subject: string;
+    message: string;
+    createdAt: string;
+    status: "Unread" | "Read" | "Responded";
+  }
+  const [contacts, setContacts] = useState<ContactMessage[]>([]);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [adminSubTab, setAdminSubTab] = useState<"applicants" | "contacts" | "faq">("applicants");
+
+  interface FAQItem {
+    id: string;
+    question: string;
+    answer: string;
+    category: string;
+    createdAt: string;
+  }
+  const [faqs, setFaqs] = useState<FAQItem[]>([]);
+  const [loadingFaqs, setLoadingFaqs] = useState(false);
+  const [editingFaq, setEditingFaq] = useState<FAQItem | null>(null);
+  const [faqFormQuestion, setFaqFormQuestion] = useState("");
+  const [faqFormAnswer, setFaqFormAnswer] = useState("");
+  const [faqFormCategory, setFaqFormCategory] = useState("Pendaftaran");
+  const [isSavingFaq, setIsSavingFaq] = useState(false);
+  const [openFaqId, setOpenFaqId] = useState<string | null>(null);
+  const [userFaqSearch, setUserFaqSearch] = useState("");
+  const [userFaqCategory, setUserFaqCategory] = useState("All");
+
   const [adminApplicants, setAdminApplicants] = useState<Applicant[]>([]);
   const [adminSearch, setAdminSearch] = useState("");
   const [adminFilterProdi, setAdminFilterProdi] = useState("All");
@@ -205,21 +257,149 @@ export default function App() {
     });
   };
 
-  const handleContactSubmit = (e: React.FormEvent) => {
+  const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmittingContact(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: contactName,
+          email: contactEmail,
+          phone: contactPhone,
+          subject: contactSubject,
+          message: contactMessage
+        })
+      });
+      if (res.ok) {
+        setSuccessContactMsg(true);
+        setContactName("");
+        setContactEmail("");
+        setContactPhone("");
+        setContactSubject("");
+        setContactMessage("");
+        
+        // Refresh contact list for admin if admin is logged in
+        if (isAdminLoggedIn) {
+          fetchContacts();
+        }
+      } else {
+        const errData = await res.json();
+        alert(errData.message || "Gagal mengirim pesan.");
+      }
+    } catch (err) {
+      console.error("Error submitting contact:", err);
+      alert("Terjadi kesalahan koneksi saat mengirim formulir.");
+    } finally {
       setIsSubmittingContact(false);
-      setSuccessContactMsg(true);
-      setContactName("");
-      setContactEmail("");
-      setContactPhone("");
-      setContactSubject("");
-      setContactMessage("");
-    }, 1200);
+    }
   };
 
   // Fetch Admin Data
+  const fetchContacts = async () => {
+    setLoadingContacts(true);
+    try {
+      const res = await fetch("/api/contacts");
+      if (res.ok) {
+        const data = await res.json();
+        setContacts(data);
+      }
+    } catch (err) {
+      console.error("Error fetching contacts:", err);
+    } finally {
+      setLoadingContacts(false);
+    }
+  };
+
+  const handleUpdateContactStatus = async (contactId: string, newStatus: "Unread" | "Read" | "Responded") => {
+    try {
+      const res = await fetch("/api/contacts/update-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: contactId, status: newStatus })
+      });
+      if (res.ok) {
+        setContacts(prev => prev.map(c => c.id === contactId ? { ...c, status: newStatus } : c));
+      } else {
+        alert("Gagal memperbarui status pesan.");
+      }
+    } catch (err) {
+      console.error("Error updating contact status:", err);
+    }
+  };
+
+  const fetchFaqs = async () => {
+    setLoadingFaqs(true);
+    try {
+      const res = await fetch("/api/faqs");
+      if (res.ok) {
+        const data = await res.json();
+        setFaqs(data);
+      }
+    } catch (err) {
+      console.error("Error fetching FAQs:", err);
+    } finally {
+      setLoadingFaqs(false);
+    }
+  };
+
+  const handleSaveFaq = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!faqFormQuestion.trim() || !faqFormAnswer.trim() || !faqFormCategory.trim()) {
+      alert("Semua kolom FAQ harus diisi.");
+      return;
+    }
+    setIsSavingFaq(true);
+    try {
+      const url = editingFaq ? "/api/faqs/update" : "/api/faqs";
+      const payload = editingFaq 
+        ? { id: editingFaq.id, question: faqFormQuestion.trim(), answer: faqFormAnswer.trim(), category: faqFormCategory }
+        : { question: faqFormQuestion.trim(), answer: faqFormAnswer.trim(), category: faqFormCategory };
+      
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setFaqFormQuestion("");
+        setFaqFormAnswer("");
+        setFaqFormCategory("Pendaftaran");
+        setEditingFaq(null);
+        fetchFaqs();
+      } else {
+        const errData = await res.json();
+        alert(errData.message || "Gagal menyimpan FAQ.");
+      }
+    } catch (err) {
+      console.error("Error saving FAQ:", err);
+      alert("Terjadi kesalahan koneksi saat menyimpan FAQ.");
+    } finally {
+      setIsSavingFaq(false);
+    }
+  };
+
+  const handleDeleteFaq = async (faqId: string) => {
+    if (!window.confirm("Apakah Anda yakin ingin menghapus FAQ ini?")) return;
+    try {
+      const res = await fetch("/api/faqs/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: faqId })
+      });
+      if (res.ok) {
+        fetchFaqs();
+      } else {
+        alert("Gagal menghapus FAQ.");
+      }
+    } catch (err) {
+      console.error("Error deleting FAQ:", err);
+    }
+  };
+
   const fetchAdminApplicants = async () => {
     setLoadingAdminData(true);
     try {
@@ -253,8 +433,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    fetchFaqs();
+  }, []);
+
+  useEffect(() => {
     if (activeTab === "admin" && isAdminLoggedIn) {
       fetchAdminApplicants();
+      fetchContacts();
+      fetchFaqs();
     }
   }, [activeTab, isAdminLoggedIn]);
 
@@ -299,6 +485,42 @@ export default function App() {
       setMabaLoginError("Gagal menghubungkan ke server.");
     } finally {
       setIsLoggingInMaba(false);
+    }
+  };
+
+  // Maba Forgot Password handler
+  const handleMabaForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotSearchKey.trim()) return;
+    setIsSubmittingForgot(true);
+    setForgotStatus(null);
+    try {
+      const res = await fetch("/api/maba/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ searchKey: forgotSearchKey.trim() })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setForgotStatus({
+          type: "success",
+          text: data.message || "Password Anda berhasil dipulihkan.",
+          password: data.password
+        });
+      } else {
+        setForgotStatus({
+          type: "error",
+          text: data.message || "Gagal memulihkan password."
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      setForgotStatus({
+        type: "error",
+        text: "Gagal menghubungkan ke server."
+      });
+    } finally {
+      setIsSubmittingForgot(false);
     }
   };
 
@@ -518,12 +740,17 @@ export default function App() {
     }
   };
 
-  // Handle mock file uploads
-  const handleFileUploadMock = (docType: "ijazah" | "ktp" | "foto", fileName: string) => {
+  // Handle real file uploads for PMB portal
+  const handleRealFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, docType: "ijazah" | "ktp" | "foto") => {
     if (!currentApplicant) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     setUploadingDoc(true);
     
-    setTimeout(async () => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64String = reader.result as string;
       try {
         const res = await fetch("/api/upload-document", {
           method: "POST",
@@ -531,22 +758,1045 @@ export default function App() {
           body: JSON.stringify({
             id: currentApplicant.id,
             docType,
-            docName: fileName,
-            docSize: "1.4 MB",
-            base64: "dummy_file_uploaded"
+            docName: file.name,
+            docSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+            base64: base64String
           })
         });
         if (res.ok) {
           const updated = await res.json();
           setCurrentApplicant(updated);
-          setUploadedFiles(prev => ({ ...prev, [docType]: fileName }));
+          setUploadedFiles(prev => ({ ...prev, [docType]: file.name }));
+          alert(`Dokumen ${docType.toUpperCase()} berhasil diunggah.`);
+        } else {
+          const errData = await res.json();
+          alert(errData.message || "Gagal mengunggah berkas.");
         }
       } catch (err) {
         console.error(err);
+        alert("Terjadi kesalahan saat mengunggah berkas.");
       } finally {
         setUploadingDoc(false);
       }
-    }, 1200);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle real payment proof PDF upload
+  const handlePaymentFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!currentApplicant) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      alert("Bukti pembayaran pendaftaran wajib berformat PDF.");
+      return;
+    }
+
+    setUploadingDoc(true);
+    
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64String = reader.result as string;
+      try {
+        const res = await fetch("/api/payment/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: currentApplicant.id,
+            fileName: file.name,
+            fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+            base64: base64String
+          })
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          setCurrentApplicant(updated);
+          alert("Selamat! Bukti pembayaran berhasil diunggah. Status pendaftaran Anda sekarang LUNAS.");
+        } else {
+          const errData = await res.json();
+          alert(errData.message || "Gagal mengunggah bukti pembayaran.");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Terjadi kesalahan saat mengunggah bukti pembayaran.");
+      } finally {
+        setUploadingDoc(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle downloading all applicants as a beautifully formatted Excel spreadsheet
+  const handleDownloadCSV = () => {
+    if (!adminApplicants || adminApplicants.length === 0) {
+      alert("Tidak ada data pendaftar untuk diunduh.");
+      return;
+    }
+
+    const title = "REKAP DATA CALON MAHASISWA BARU TA 2026/2027";
+    const subtitle = "INSTITUT TEKNOLOGI DAN BISNIS TRENGGALEK";
+    const dateGenerated = `Diunduh pada: ${new Date().toLocaleString("id-ID")}`;
+
+    const headers = [
+      "No. ID Pendaftaran", 
+      "Nama Calon Mahasiswa", 
+      "Email", 
+      "WhatsApp", 
+      "Asal Sekolah", 
+      "Pilihan Prodi 1", 
+      "Pilihan Prodi 2", 
+      "Skor CBT", 
+      "Status Pembayaran", 
+      "Status Seleksi PMB", 
+      "Tanggal Pendaftaran",
+      "Berkas Ijazah",
+      "Berkas KTP",
+      "Pas Foto",
+      "Bukti Pembayaran",
+      "Tanda Tangan Digital"
+    ];
+
+    let html = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Rekap PMB ITB Trenggalek</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <style>
+          body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; }
+          .title { font-size: 16px; font-weight: bold; text-align: center; color: #0f172a; height: 30px; vertical-align: middle; }
+          .subtitle { font-size: 11px; font-weight: bold; text-align: center; color: #475569; height: 20px; vertical-align: middle; }
+          .meta { font-size: 9px; text-align: right; color: #64748b; font-style: italic; height: 20px; vertical-align: middle; }
+          table { border-collapse: collapse; }
+          th { background-color: #1e293b; color: #ffffff; font-weight: bold; font-size: 11px; border: 1px solid #475569; padding: 10px; text-align: center; height: 28px; }
+          td { border: 1px solid #cbd5e1; font-size: 11px; padding: 8px; vertical-align: middle; height: 24px; }
+          .text-center { text-align: center; }
+          .text-left { text-align: left; }
+          .badge-lunas { background-color: #d1fae5; color: #065f46; font-weight: bold; text-align: center; }
+          .badge-pending { background-color: #fef3c7; color: #92400e; font-weight: bold; text-align: center; }
+          .badge-lulus { background-color: #d1fae5; color: #065f46; font-weight: bold; text-align: center; }
+          .badge-proses { background-color: #f1f5f9; color: #475569; text-align: center; }
+          .badge-gagal { background-color: #fee2e2; color: #991b1b; text-align: center; }
+          .mso-num { mso-number-format: "\\@"; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <tr>
+            <td colspan="${headers.length}" class="title">${title}</td>
+          </tr>
+          <tr>
+            <td colspan="${headers.length}" class="subtitle">${subtitle}</td>
+          </tr>
+          <tr>
+            <td colspan="${headers.length}" class="meta">${dateGenerated}</td>
+          </tr>
+          <tr>
+            <td colspan="${headers.length}" style="height: 15px; border: none;"></td>
+          </tr>
+          <thead>
+            <tr>
+              ${headers.map(h => `<th>${h}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    adminApplicants.forEach(app => {
+      const isLunas = app.payment?.status === "Paid";
+      const isLulus = app.status.startsWith("Graduated_");
+      const isGagal = app.status === "Rejected";
+      
+      let statusPembayaranText = isLunas ? "LUNAS" : "PENDING";
+      let statusPembayaranClass = isLunas ? "badge-lunas" : "badge-pending";
+
+      let statusPMBText = "Seleksi Berkas";
+      let statusPMBClass = "badge-proses";
+      
+      if (isLulus) {
+        const prodiName = app.status.split("Graduated_")[1]?.replace(/_/g, " ");
+        statusPMBText = `LULUS - S1 ${prodiName}`;
+        statusPMBClass = "badge-lulus";
+      } else if (isGagal) {
+        statusPMBText = "TIDAK LULUS";
+        statusPMBClass = "badge-gagal";
+      } else if (app.status === "CBT_Exam") {
+        statusPMBText = "Sedang Ujian CBT";
+      } else if (app.status === "Paid") {
+        statusPMBText = "Sudah Bayar / Unggah Berkas";
+      } else if (app.status === "Interview") {
+        statusPMBText = "Wawancara / Review";
+      }
+
+      const scoreVal = app.exam?.score !== undefined ? app.exam.score : "-";
+      
+      const ijazahLink = app.documents?.ijazah?.name 
+        ? `<a href="${window.location.origin}/api/document-view?id=${encodeURIComponent(app.id)}&type=ijazah" style="color: #0284c7; text-decoration: underline; font-weight: 600;" target="_blank">Buka Ijazah</a>` 
+        : "Belum Diunggah";
+
+      const ktpLink = app.documents?.ktp?.name 
+        ? `<a href="${window.location.origin}/api/document-view?id=${encodeURIComponent(app.id)}&type=ktp" style="color: #0284c7; text-decoration: underline; font-weight: 600;" target="_blank">Buka KTP</a>` 
+        : "Belum Diunggah";
+
+      const fotoLink = app.documents?.foto?.name 
+        ? `<a href="${window.location.origin}/api/document-view?id=${encodeURIComponent(app.id)}&type=foto" style="color: #0284c7; text-decoration: underline; font-weight: 600;" target="_blank">Buka Foto</a>` 
+        : "Belum Diunggah";
+
+      const buktiBayarLink = app.payment?.buktiBayar?.name 
+        ? `<a href="${window.location.origin}/api/document-view?id=${encodeURIComponent(app.id)}&type=bukti_bayar" style="color: #0284c7; text-decoration: underline; font-weight: 600;" target="_blank">Buka Bukti Bayar</a>` 
+        : "Belum Diunggah";
+
+      const signatureLink = app.signature 
+        ? `<a href="${window.location.origin}/api/document-view?id=${encodeURIComponent(app.id)}&type=signature" style="color: #0284c7; text-decoration: underline; font-weight: 600;" target="_blank">Buka TTD</a>` 
+        : "Belum Ditandatangani";
+
+      html += `
+        <tr>
+          <td class="text-center mso-num" style="font-weight: bold; color: #0284c7;">${app.id}</td>
+          <td class="text-left" style="font-weight: 600; color: #0f172a;">${app.name}</td>
+          <td class="text-left">${app.email}</td>
+          <td class="text-center mso-num">${app.whatsapp}</td>
+          <td class="text-left">${app.school}</td>
+          <td class="text-left">${app.prodi1}</td>
+          <td class="text-left">${app.prodi2}</td>
+          <td class="text-center" style="font-weight: bold; color: #3b82f6;">${scoreVal}</td>
+          <td class="${statusPembayaranClass}">${statusPembayaranText}</td>
+          <td class="${statusPMBClass}">${statusPMBText}</td>
+          <td class="text-center">${new Date(app.createdAt).toLocaleDateString("id-ID")}</td>
+          <td class="text-left" style="color: ${app.documents?.ijazah?.name ? '#0284c7' : '#b91c1c'};">${ijazahLink}</td>
+          <td class="text-left" style="color: ${app.documents?.ktp?.name ? '#0284c7' : '#b91c1c'};">${ktpLink}</td>
+          <td class="text-left" style="color: ${app.documents?.foto?.name ? '#0284c7' : '#b91c1c'};">${fotoLink}</td>
+          <td class="text-left" style="color: ${app.payment?.buktiBayar?.name ? '#0284c7' : '#b91c1c'};">${buktiBayarLink}</td>
+          <td class="text-center" style="color: ${app.signature ? '#0284c7' : '#b91c1c'}; font-weight: 500;">${signatureLink}</td>
+        </tr>
+      `;
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const encodedUri = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Rekap_Pendaftar_PMB_ITB_Trenggalek_${new Date().toISOString().slice(0, 10)}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Handle downloading specific document
+  const handleDownloadApplicantFile = (applicant: Applicant, type: "ijazah" | "ktp" | "foto" | "bukti_bayar") => {
+    let doc = null;
+    if (type === "bukti_bayar") {
+      doc = applicant.payment?.buktiBayar;
+    } else {
+      doc = applicant.documents?.[type];
+    }
+    if (!doc) {
+      alert("Berkas tersebut belum diunggah oleh pendaftar.");
+      return;
+    }
+
+    if (!doc.base64) {
+      const dummyContent = `%PDF-1.4\n%...\n1 0 obj\n<<\n/Title (${doc.name})\n/Author (PMB ITB Trenggalek)\n>>\nendobj\n...`;
+      const blob = new Blob([dummyContent], { type: "application/pdf" });
+      const encodedUri = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", doc.name || `${type}_${applicant.id}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const link = document.createElement("a");
+      link.setAttribute("href", doc.base64);
+      link.setAttribute("download", doc.name);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  // Download full applicant report as PDF-like printable slip
+  const handleDownloadApplicantPDF = (applicant: Applicant) => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Harap izinkan pop-up browser Anda untuk mencetak / mengunduh berkas PDF.");
+      return;
+    }
+    
+    const prodiDiterima = applicant.status.startsWith("Graduated_")
+      ? applicant.status.split("Graduated_")[1]?.replace(/_/g, " ")
+      : "-";
+
+    const isGraduated = applicant.status.startsWith("Graduated_");
+
+    // Dynamic clean display for program studi
+    const getProdiText = (slug: string) => {
+      if (slug.includes("Ilmu_Komputer")) return "S1 Ilmu Komputer";
+      if (slug.includes("Manajemen_Ritel")) return "S1 Manajemen Ritel";
+      if (slug.includes("Bisnis_Digital")) return "S1 Bisnis Digital";
+      return slug;
+    };
+
+    const formattedProdi1 = getProdiText(applicant.prodi1);
+    const formattedProdi2 = getProdiText(applicant.prodi2);
+    const formattedProdiDiterima = getProdiText(prodiDiterima);
+
+    // Real Logo ITB Trenggalek - Imported Image Asset
+    const logoSvg = `
+      <img src="${ITBTrenggalekLogo}" alt="Logo ITB Trenggalek" style="width: 85px; height: 85px; display: block; margin: 0 auto; object-fit: contain;" />
+    `;
+
+    // PMB Committee Signature & Stamp
+    const committeeSignatureSvg = `
+      <svg width="150" height="65" viewBox="0 0 150 65" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity: 0.95; display: inline-block;">
+        <!-- Blue ink handwritten-like signature path -->
+        <path d="M12 42 C28 15, 32 58, 48 32 C60 12, 65 52, 78 28 C88 10, 94 48, 110 26 C124 12, 130 45, 142 22" stroke="#1d4ed8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M22 46 C45 45, 82 40, 135 38" stroke="#1d4ed8" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M52 24 C65 24, 82 20, 105 18" stroke="#1d4ed8" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+    `;
+
+    const officialStampHtml = `
+      <div style="position: absolute; left: -15px; top: -15px; pointer-events: none; opacity: 0.85; z-index: 10;">
+        <svg width="115" height="115" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer Stamp Border -->
+          <circle cx="60" cy="60" r="54" stroke="#1d4ed8" stroke-width="2" fill="none" />
+          <circle cx="60" cy="60" r="49" stroke="#1d4ed8" stroke-width="0.8" fill="none" />
+          <circle cx="60" cy="60" r="34" stroke="#1d4ed8" stroke-width="0.8" stroke-dasharray="2,2" fill="none" />
+          
+          <!-- Center Star and Logo Shape -->
+          <path d="M60 48 L63 54 L70 55 L65 60 L66 67 L60 63 L54 67 L55 60 L50 55 L57 54 Z" fill="#1d4ed8" />
+          
+          <!-- Circular Curved Text -->
+          <path id="stampTextPath" d="M 60,60 m -43,0 a 43,43 0 1,1 86,0 a 43,43 0 1,1 -86,0" fill="none" />
+          <text font-family="'Inter', sans-serif" font-size="7.5" font-weight="bold" fill="#1d4ed8" letter-spacing="1">
+            <textPath href="#stampTextPath" startOffset="0%">
+              * PANITIA PMB 2026 * ITB TRENGGALEK * PANITIA PMB 2026 * ITB TRENGGALEK
+            </textPath>
+          </text>
+        </svg>
+      </div>
+    `;
+
+    const content = `
+      <html>
+        <head>
+          <title>KARTU_PMB_SURAT_KELULUSAN_${applicant.id}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+          <style>
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
+            }
+            body {
+              font-family: "Inter", sans-serif;
+              color: #1e293b;
+              background-color: #f1f5f9;
+              line-height: 1.5;
+              padding: 20px;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            
+            /* Page container */
+            .page {
+              background: #ffffff;
+              width: 210mm;
+              min-height: 297mm;
+              padding: 20mm;
+              margin: 20px auto;
+              border-radius: 12px;
+              box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+              position: relative;
+              overflow: hidden;
+            }
+
+            /* Watermark background */
+            .watermark {
+              position: absolute;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%) rotate(-30deg);
+              opacity: 0.025;
+              font-size: 80px;
+              font-weight: 900;
+              color: #0f2954;
+              pointer-events: none;
+              white-space: nowrap;
+              user-select: none;
+              z-index: 0;
+            }
+
+            /* Kop Surat (Letterhead) Style */
+            .kop-surat {
+              display: flex;
+              align-items: center;
+              border-bottom: 4px solid #0f2954;
+              padding-bottom: 15px;
+              margin-bottom: 25px;
+              position: relative;
+            }
+            .kop-surat::after {
+              content: "";
+              position: absolute;
+              bottom: -8px;
+              left: 0;
+              right: 0;
+              height: 1.5px;
+              background-color: #d4af37;
+            }
+            .kop-logo {
+              flex-shrink: 0;
+              margin-right: 20px;
+            }
+            .kop-text {
+              flex-grow: 1;
+              text-align: center;
+              margin-right: 40px; /* balance logo offset */
+            }
+            .kop-univ-id {
+              font-size: 10px;
+              font-weight: 700;
+              color: #475569;
+              letter-spacing: 2px;
+              text-transform: uppercase;
+              margin-bottom: 3px;
+            }
+            .kop-univ-name {
+              font-family: "Playfair Display", serif;
+              font-size: 20px;
+              font-weight: 800;
+              color: #0f2954;
+              line-height: 1.2;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+            }
+            .kop-univ-subname {
+              font-size: 11px;
+              color: #d4af37;
+              font-weight: 700;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              margin-top: 2px;
+            }
+            .kop-univ-address {
+              font-size: 10px;
+              color: #64748b;
+              margin-top: 5px;
+              font-style: italic;
+            }
+
+            /* Section Headers */
+            .doc-title-container {
+              text-align: center;
+              margin-bottom: 25px;
+              position: relative;
+              z-index: 2;
+            }
+            .doc-title {
+              font-size: 18px;
+              font-weight: 800;
+              color: #0f2954;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              display: inline-block;
+              border-bottom: 2px solid #d4af37;
+              padding-bottom: 4px;
+            }
+            .doc-subtitle {
+              font-size: 11px;
+              color: #64748b;
+              margin-top: 6px;
+              font-weight: 500;
+              letter-spacing: 0.5px;
+            }
+
+            /* Badge elements */
+            .badge-status {
+              background-color: #f0fdf4;
+              border: 1px solid #bbf7d0;
+              color: #16a34a;
+              display: inline-block;
+              padding: 6px 14px;
+              border-radius: 99px;
+              font-weight: 700;
+              font-size: 11px;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+            }
+            .badge-status-unpaid {
+              background-color: #fef2f2;
+              border: 1px solid #fecaca;
+              color: #dc2626;
+              display: inline-block;
+              padding: 6px 14px;
+              border-radius: 99px;
+              font-weight: 700;
+              font-size: 11px;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+            }
+
+            /* Cards layout */
+            .grid-identity {
+              display: grid;
+              grid-template-cols: 2.2fr 1fr;
+              gap: 25px;
+              margin-bottom: 25px;
+              position: relative;
+              z-index: 2;
+            }
+            .card-details {
+              border: 1px solid #e2e8f0;
+              background-color: #f8fafc;
+              border-radius: 16px;
+              padding: 20px;
+            }
+            .card-photo-box {
+              border: 1px dashed #cbd5e1;
+              border-radius: 16px;
+              background-color: #f8fafc;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              padding: 20px;
+              text-align: center;
+              height: 100%;
+            }
+            .photo-slot {
+              width: 110px;
+              height: 140px;
+              border: 1px solid #94a3b8;
+              border-radius: 8px;
+              background-color: #f1f5f9;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              overflow: hidden;
+              box-shadow: 0 4px 10px rgba(0,0,0,0.04);
+              margin-bottom: 10px;
+            }
+            .photo-slot img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+            }
+
+            /* Info Tables */
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
+            }
+            .info-table th {
+              background-color: #0f2954;
+              color: #ffffff;
+              text-align: left;
+              padding: 10px 14px;
+              font-size: 11px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              border-radius: 8px 8px 0 0;
+            }
+            .info-table td {
+              padding: 10px 14px;
+              font-size: 12px;
+              border-bottom: 1px solid #f1f5f9;
+              color: #334155;
+            }
+            .info-table tr:last-child td {
+              border-bottom: none;
+            }
+            .table-label {
+              font-weight: 600;
+              width: 180px;
+              color: #475569;
+            }
+            .table-colon {
+              width: 15px;
+              color: #94a3b8;
+            }
+            .table-value {
+              font-weight: 500;
+              color: #1e293b;
+            }
+
+            /* Elegant border outline for elements */
+            .section-box {
+              border: 1px solid #e2e8f0;
+              border-radius: 16px;
+              padding: 20px;
+              margin-bottom: 25px;
+              background-color: #ffffff;
+              position: relative;
+              z-index: 2;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.01);
+            }
+            .section-box-title {
+              font-size: 12px;
+              font-weight: 800;
+              color: #0f2954;
+              text-transform: uppercase;
+              letter-spacing: 1.5px;
+              margin-bottom: 15px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .section-box-title::after {
+              content: "";
+              flex-grow: 1;
+              height: 1px;
+              background-color: #e2e8f0;
+            }
+
+            /* Footer signature blocks */
+            .doc-footer {
+              margin-top: auto;
+              padding-top: 30px;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+              position: relative;
+              z-index: 2;
+            }
+            .signature-block {
+              text-align: center;
+              width: 240px;
+              position: relative;
+            }
+            .signature-block p {
+              font-size: 11px;
+              color: #64748b;
+              margin-bottom: 10px;
+            }
+            .signature-block .role {
+              font-weight: 700;
+              color: #0f2954;
+              font-size: 11.5px;
+              margin-bottom: 5px;
+            }
+            .signature-block .name {
+              font-weight: 700;
+              color: #1e293b;
+              font-size: 12.5px;
+              border-bottom: 1px solid #94a3b8;
+              padding-bottom: 3px;
+              display: inline-block;
+              margin-top: 5px;
+            }
+            .signature-block .nip {
+              font-family: 'JetBrains Mono', monospace;
+              font-size: 10px;
+              color: #64748b;
+              margin-top: 3px;
+            }
+
+            /* Print layout & breaks */
+            @media print {
+              body {
+                background-color: #ffffff;
+                padding: 0;
+              }
+              .page {
+                margin: 0;
+                box-shadow: none;
+                border-radius: 0;
+                page-break-after: always;
+              }
+              .page:last-child {
+                page-break-after: avoid;
+              }
+            }
+
+            /* Letter typography */
+            .letter-content {
+              font-size: 12.5px;
+              color: #334155;
+              line-height: 1.7;
+              text-align: justify;
+              position: relative;
+              z-index: 2;
+            }
+            .letter-content p {
+              margin-bottom: 14px;
+            }
+            .letter-meta {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              color: #475569;
+              margin-bottom: 25px;
+              border-bottom: 1px dashed #e2e8f0;
+              padding-bottom: 10px;
+            }
+            .letter-meta-label {
+              font-weight: 600;
+            }
+          </style>
+        </head>
+        <body>
+          
+          <!-- PAGE 1: KARTU PESERTA PMB -->
+          <div class="page">
+            <div class="watermark">ITB TRENGGALEK</div>
+            
+            <!-- Letterhead -->
+            <div class="kop-surat">
+              <div class="kop-logo">
+                ${logoSvg}
+              </div>
+              <div class="kop-text">
+                <div class="kop-univ-id">Panitia Penerimaan Mahasiswa Baru</div>
+                <div class="kop-univ-name">Institut Teknologi dan Bisnis Trenggalek</div>
+                <div class="kop-univ-subname">Fakultas Sains & Teknologi | Fakultas Ekonomi & Bisnis</div>
+                <div class="kop-univ-address">Jl. Soekarno-Hatta, Kelutan, Kec. Trenggalek, Jawa Timur - Telp: (0355) 791333</div>
+              </div>
+            </div>
+
+            <!-- Title -->
+            <div class="doc-title-container">
+              <div class="doc-title">Kartu Bukti Pendaftaran & Ujian PMB</div>
+              <div class="doc-subtitle">Tahun Akademik 2026/2027</div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 20px; position: relative; z-index: 2;">
+              <div class="${applicant.payment?.status === 'Paid' ? 'badge-status' : 'badge-status-unpaid'}">
+                Status Pembayaran: ${applicant.payment?.status === "Paid" ? "LUNAS (PAID)" : "BELUM LUNAS"}
+              </div>
+            </div>
+
+            <!-- Identity Grid -->
+            <div class="grid-identity">
+              <div class="card-details">
+                <table class="info-table">
+                  <thead>
+                    <tr>
+                      <th colspan="3">Informasi Calon Mahasiswa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td class="table-label">No. ID Pendaftaran</td>
+                      <td class="table-colon">:</td>
+                      <td class="table-value" style="font-family: 'JetBrains Mono', monospace; font-size: 13.5px; font-weight: 700; color: #0f2954;">${applicant.id}</td>
+                    </tr>
+                    <tr>
+                      <td class="table-label">Nama Lengkap</td>
+                      <td class="table-colon">:</td>
+                      <td class="table-value" style="font-weight: 700; text-transform: uppercase;">${applicant.name}</td>
+                    </tr>
+                    <tr>
+                      <td class="table-label">Email</td>
+                      <td class="table-colon">:</td>
+                      <td class="table-value">${applicant.email}</td>
+                    </tr>
+                    <tr>
+                      <td class="table-label">Nomor WhatsApp</td>
+                      <td class="table-colon">:</td>
+                      <td class="table-value">${applicant.whatsapp}</td>
+                    </tr>
+                    <tr>
+                      <td class="table-label">Asal Sekolah</td>
+                      <td class="table-colon">:</td>
+                      <td class="table-value">${applicant.school}</td>
+                    </tr>
+                    <tr>
+                      <td class="table-label">Tanggal Pendaftaran</td>
+                      <td class="table-colon">:</td>
+                      <td class="table-value">${new Date(applicant.createdAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              
+              <div class="card-photo-box">
+                <div class="photo-slot">
+                  ${applicant.documents?.foto?.base64 
+                    ? `<img src="${applicant.documents.foto.base64}" alt="Foto Calon Mahasiswa" />` 
+                    : `<span style="font-size: 9px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">FOTO 3X4</span>`
+                  }
+                </div>
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #64748b; font-weight: bold; border: 1px solid #cbd5e1; padding: 4px 6px; border-radius: 4px; background-color: #ffffff; width: 100%;">
+                  VERIFIED CARD
+                </div>
+              </div>
+            </div>
+
+            <!-- Academic Choices -->
+            <div class="section-box">
+              <div class="section-box-title">Program Studi & Hasil Evaluasi</div>
+              <table class="info-table" style="margin-bottom: 0;">
+                <tbody>
+                  <tr>
+                    <td class="table-label">Pilihan Program Studi 1</td>
+                    <td class="table-colon">:</td>
+                    <td class="table-value">${formattedProdi1}</td>
+                  </tr>
+                  <tr>
+                    <td class="table-label">Pilihan Program Studi 2</td>
+                    <td class="table-colon">:</td>
+                    <td class="table-value">${formattedProdi2}</td>
+                  </tr>
+                  <tr>
+                    <td class="table-label">Nilai Seleksi CBT (Ujian)</td>
+                    <td class="table-colon">:</td>
+                    <td class="table-value" style="font-weight: 700;">
+                      ${applicant.exam?.score !== undefined 
+                        ? `<span style="color: #0f2954; font-family: 'JetBrains Mono', monospace; font-size: 13px;">${applicant.exam.score} / 100</span>` 
+                        : `<span style="color: #64748b; font-style: italic;">Belum Melaksanakan Ujian</span>`
+                      }
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="table-label">Keputusan Akhir Seleksi</td>
+                    <td class="table-colon">:</td>
+                    <td class="table-value" style="font-weight: 800;">
+                      ${isGraduated 
+                        ? `<span style="color: #16a34a; text-transform: uppercase;">LULUS SELEKSI (${formattedProdiDiterima})</span>` 
+                        : applicant.status === "Rejected"
+                        ? `<span style="color: #dc2626; text-transform: uppercase;">TIDAK LOLOS</span>`
+                        : `<span style="color: #64748b; text-transform: uppercase;">SEDANG PROSES SELEKSI</span>`
+                      }
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Notes -->
+            <div style="margin-top: 15px; padding: 12px 16px; border-radius: 8px; border-left: 4px solid #0f2954; background-color: #f8fafc; font-size: 10px; color: #475569; position: relative; z-index: 2;">
+              <strong style="color: #0f2954; display: block; margin-bottom: 3px;">PENTING & CATATAN PANITIA:</strong>
+              1. Simpan bukti fisik / digital kartu ini sebagai tanda pengenal resmi Anda sepanjang masa seleksi PMB ITB Trenggalek.<br/>
+              2. Kartu ini sah digunakan sebagai bukti verifikasi pendaftaran mahasiswa baru.<br/>
+              3. Tanda tangan di sebelah kanan bawah merupakan bukti sah komitmen pendaftar dan persetujuan sistem akademik.
+            </div>
+
+            <!-- Signatures -->
+            <div class="doc-footer" style="margin-top: 40px;">
+              <div class="signature-block">
+                <p>Trenggalek, ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</p>
+                <div class="role">Mengetahui,<br/>Ketua Panitia PMB ITB Trenggalek</div>
+                <div style="position: relative; height: 75px; display: flex; align-items: center; justify-content: center;">
+                  ${committeeSignatureSvg}
+                  ${officialStampHtml}
+                </div>
+                <div class="name">Drs. H. M. Sidik, M.B.A.</div>
+                <div class="nip">NIP. 19741021 200312 1 002</div>
+              </div>
+
+              <div class="signature-block">
+                <p>&nbsp;</p>
+                <div class="role">Tanda Tangan Calon Mahasiswa,<br/>(Tanda Tangan Elektronik)</div>
+                <div style="height: 75px; display: flex; align-items: center; justify-content: center;">
+                  ${applicant.signature 
+                    ? `<img src="${applicant.signature}" style="max-height: 65px; max-width: 160px; object-fit: contain;" alt="Tanda Tangan Calon Mahasiswa" />` 
+                    : `<div style="border: 1px dashed #cbd5e1; border-radius: 6px; width: 130px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #94a3b8;">Belum TTD Digital</div>`
+                  }
+                </div>
+                <div class="name">${applicant.name}</div>
+                <div class="nip" style="text-transform: uppercase;">ID: ${applicant.id.substring(0, 8)}</div>
+              </div>
+            </div>
+          </div>
+
+
+          <!-- PAGE 2: SURAT KEPUTUSAN KELULUSAN (Only printed if Graduated) -->
+          ${isGraduated ? `
+            <div class="page" style="page-break-before: always;">
+              <div class="watermark">ITB TRENGGALEK</div>
+              
+              <!-- Letterhead -->
+              <div class="kop-surat">
+                <div class="kop-logo">
+                  ${logoSvg}
+                </div>
+                <div class="kop-text">
+                  <div class="kop-univ-id">REKTORAT INSTITUT TEKNOLOGI DAN BISNIS TRENGGALEK</div>
+                  <div class="kop-univ-name">Institut Teknologi dan Bisnis Trenggalek</div>
+                  <div class="kop-univ-subname">Surat Keputusan Kelulusan Seleksi Penerimaan Mahasiswa Baru</div>
+                  <div class="kop-univ-address">Jl. Soekarno-Hatta, Kelutan, Kec. Trenggalek, Jawa Timur - Telp: (0355) 791333</div>
+                </div>
+              </div>
+
+              <!-- Meta info of Letter -->
+              <div class="letter-meta">
+                <div>
+                  <div><span class="letter-meta-label">Nomor:</span> 108/PMB/ITB-TR/VII/2026</div>
+                  <div><span class="letter-meta-label">Lampiran:</span> 1 (Satu) Berkas Slip Kelulusan</div>
+                  <div><span class="letter-meta-label">Perihal:</span> Surat Keputusan Hasil Seleksi Penerimaan Mahasiswa Baru</div>
+                </div>
+                <div style="text-align: right;">
+                  <div>Trenggalek, ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</div>
+                  <div>Sifat: Penting & Segera</div>
+                </div>
+              </div>
+
+              <div class="letter-content">
+                <p><strong>Kepada Yth.</strong></p>
+                <p style="margin-left: 15px; font-weight: 700; color: #0f2954; text-transform: uppercase;">
+                  Sdr/i. ${applicant.name}<br/>
+                  No. Pendaftaran: ${applicant.id}<br/>
+                  Di Tempat
+                </p>
+
+                <p style="margin-top: 15px;"><i>Assalamu'alaikum Warahmatullahi Wabarakatuh,</i></p>
+                
+                <p>
+                  Berdasarkan hasil evaluasi komprehensif berkas pendaftaran administrasi, nilai Ujian CBT <i>(Computer Based Test)</i>, serta Tes Minat & Bakat yang telah diselenggarakan oleh panitia, Rektor Institut Teknologi dan Bisnis (ITB) Trenggalek menetapkan dengan penuh kebanggaan bahwa Anda dinyatakan:
+                </p>
+
+                <div style="text-align: center; margin: 25px 0; padding: 15px; border: 2px dashed #16a34a; background-color: #f0fdf4; border-radius: 12px;">
+                  <h4 style="font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 800; color: #15803d; letter-spacing: 0.5px; margin-bottom: 5px;">
+                    DINYATAKAN LULUS SELEKSI UTAMA
+                  </h4>
+                  <p style="font-size: 11px; color: #475569; font-weight: 500;">DITERIMA SEBAGAI MAHASISWA BARU PADA PROGRAM STUDI:</p>
+                  <p style="font-size: 15px; font-weight: 800; color: #0f2954; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    ${formattedProdiDiterima}
+                  </p>
+                  <p style="font-size: 10px; color: #16a34a; font-weight: 600; margin-top: 4px;">TAHUN AKADEMIK 2026/2027</p>
+                </div>
+
+                <p>
+                  Segenap pimpinan, dosen, dan seluruh civitas akademika ITB Trenggalek mengucapkan selamat atas pencapaian luar biasa ini. Kami menyambut kehadiran Anda untuk bergabung dalam komunitas pembelajar dinamis yang berfokus pada inovasi teknologi dan keunggulan bisnis di tingkat nasional maupun internasional.
+                </p>
+
+                <p>
+                  Sebagai langkah lanjutan administratif yang wajib dilaksanakan, mohon perhatikan petunjuk berikut:
+                </p>
+
+                <ol style="margin-left: 25px; margin-bottom: 20px; font-size: 11.5px; space-y: 5px;">
+                  <li style="margin-bottom: 4px;"><strong>Registrasi Ulang:</strong> Melakukan daftar ulang online melalui portal mahasiswa atau secara offline dengan mendatangi Sekretariat PMB Kampus ITB Trenggalek.</li>
+                  <li style="margin-bottom: 4px;"><strong>Kelengkapan Berkas:</strong> Pastikan berkas KTP, Ijazah/SKL, dan pas foto telah lengkap dan terverifikasi secara sah dalam portal.</li>
+                  <li style="margin-bottom: 4px;"><strong>Pengenalan Kampus (PKKMB):</strong> Jadwal pembekalan dan Orientasi Studi Mahasiswa Baru akan dikirimkan via email resmi dan WhatsApp resmi Anda dalam waktu dekat.</li>
+                </ol>
+
+                <p>
+                  Apabila Anda memerlukan konsultasi atau bantuan lebih lanjut mengenai proses her-registrasi, silakan menghubungi Layanan Konsultasi PMB ITB Trenggalek melalui nomor interaktif yang tersedia.
+                </p>
+
+                <p>Atas perhatian dan kerja samanya, kami sampaikan terima kasih.</p>
+                
+                <p><i>Wassalamu'alaikum Warahmatullahi Wabarakatuh.</i></p>
+              </div>
+
+              <!-- Signatures for official letter -->
+              <div class="doc-footer" style="margin-top: 35px;">
+                <div class="signature-block" style="text-align: left; width: 280px;">
+                  <div class="role" style="color: #64748b; font-weight: 400; font-size: 11px; margin-bottom: 12px;">Salinan Surat Keputusan ini disampaikan kepada:</div>
+                  <div style="font-size: 9.5px; color: #64748b; line-height: 1.4;">
+                    1. Rektor ITB Trenggalek<br/>
+                    2. Dekan Fakultas terkait<br/>
+                    3. Bagian Keuangan & Akademik<br/>
+                    4. Arsip Sekretariat PMB
+                  </div>
+                </div>
+
+                <div class="signature-block">
+                  <div class="role">An. Rektor ITB Trenggalek,<br/>Ketua Panitia PMB,</div>
+                  <div style="position: relative; height: 80px; display: flex; align-items: center; justify-content: center;">
+                    ${committeeSignatureSvg}
+                    ${officialStampHtml}
+                  </div>
+                  <div class="name">Drs. H. M. Sidik, M.B.A.</div>
+                  <div class="nip">NIP. 19741021 200312 1 002</div>
+                </div>
+              </div>
+
+            </div>
+          ` : ""}
+
+          <script>
+            window.onload = function() {
+              window.print();
+            }
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(content);
+    printWindow.document.close();
+  };
+
+  // Handle checking graduation from the front dashboard
+  const handleCheckGraduation = async () => {
+    if (!searchGradId.trim()) {
+      setGradSearchError("Harap masukkan Nomor Pendaftaran Anda.");
+      setGradSearchResult(null);
+      return;
+    }
+    setIsSearchingGrad(true);
+    setGradSearchError("");
+    setGradSearchResult(null);
+    try {
+      const res = await fetch(`/api/applicant/${searchGradId.trim()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setGradSearchResult(data);
+      } else {
+        const err = await res.json();
+        setGradSearchError(err.message || "Nomor Pendaftaran tidak ditemukan.");
+      }
+    } catch (err) {
+      console.error(err);
+      setGradSearchError("Gagal menghubungkan ke server.");
+    } finally {
+      setIsSearchingGrad(false);
+    }
+  };
+
+  // Simulate graduation status for the selected applicant instantly (to test LULUS flow)
+  const handleSimulateGraduation = async (applicantId: string, prodi: string) => {
+    try {
+      let prodiStatus = "Graduated_Ilmu_Komputer";
+      if (prodi.includes("Bisnis Digital")) {
+        prodiStatus = "Graduated_Bisnis_Digital";
+      } else if (prodi.includes("Manajemen Ritel")) {
+        prodiStatus = "Graduated_Manajemen_Ritel";
+      }
+      
+      const res = await fetch("/api/admin/update-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: applicantId, status: prodiStatus })
+      });
+      if (res.ok) {
+        alert("Simulasi Berhasil! Calon mahasiswa dinyatakan LULUS.");
+        const singleRes = await fetch(`/api/applicant/${applicantId}`);
+        if (singleRes.ok) {
+          const freshData = await singleRes.json();
+          setGradSearchResult(freshData);
+          if (currentApplicant && currentApplicant.id === applicantId) {
+            setCurrentApplicant(freshData);
+          }
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   // Signature canvas handlers
@@ -824,13 +2074,13 @@ export default function App() {
           {/* Top Header Quick Contacts / Status */}
           <div className="flex items-center gap-3">
             <a
-              href="https://wa.me/6285648730190"
+              href="https://wa.me/6281337153493"
               target="_blank"
               rel="noopener noreferrer"
               className="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-500/20 text-emerald-400 text-xs font-bold transition duration-150"
             >
               <Phone className="w-3.5 h-3.5 shrink-0 animate-bounce" />
-              <span>CS PMB: 0856-4873-0190</span>
+              <span>CS PMB: 0813-3715-3493</span>
             </a>
             <div className="flex items-center gap-2 bg-slate-950/60 px-3.5 py-1.5 rounded-xl border border-slate-800/80 text-[11px] font-mono text-slate-300">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
@@ -1023,6 +2273,32 @@ export default function App() {
                 }, 100);
               }}
             />
+
+            {/* Video Profil Kampus Section */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+              
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div className="space-y-1">
+                  <div className="inline-flex items-center gap-1.5 bg-amber-950/60 text-amber-400 px-2.5 py-1 rounded-full text-[10px] font-mono border border-amber-900/60 shadow-inner">
+                    <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+                    <span>PROFIL KAMPUS</span>
+                  </div>
+                  <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Profil Institut Teknologi & Bisnis Trenggalek</h3>
+                  <p className="text-slate-400 text-xs sm:text-sm">Tonton video profil resmi untuk mengenal lingkungan kampus, fasilitas penunjang belajar, dan atmosfer akademik kami.</p>
+                </div>
+              </div>
+
+              <div className="aspect-video w-full rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl relative">
+                <iframe
+                  src="https://www.youtube.com/embed/iKgdEmj9NPQ?si=yh-l9Id7_-3X1Asb"
+                  title="Video Profil ITB Trenggalek"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  className="w-full h-full border-0 absolute inset-0"
+                ></iframe>
+              </div>
+            </div>
 
             {/* 3 Study Programs Showcase */}
             <div className="space-y-6">
@@ -1593,7 +2869,7 @@ export default function App() {
                     Punya pertanyaan? Chat admin WhatsApp langsung untuk respon cepat selama hari & jam kerja.
                   </p>
                   <a
-                    href="https://wa.me/6285648730190"
+                    href="https://wa.me/6281337153493"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 rounded-lg text-center block text-xs shadow transition"
@@ -1612,8 +2888,103 @@ export default function App() {
         {activeTab === "portal" && (
           <div className="space-y-8">
             {!mabaUser ? (
-              /* MABA AUTHENTICATION SYSTEM (LOGIN / REGISTRATION) */
-              <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+              <>
+                {/* LIHAT KELULUSAN / GRADUATION CHECKER */}
+                <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-4">
+                  <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                    <div className="bg-amber-950/60 p-2.5 rounded-xl text-amber-400 border border-amber-800">
+                      <Award className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white">Cek Pengumuman Hasil Kelulusan Seleksi</h3>
+                      <p className="text-[11px] text-slate-400">Masukkan Nomor ID Pendaftaran Anda untuk melihat status kelulusan resmi secara real-time.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        placeholder="Contoh: PMB-2026-XXXX"
+                        value={searchGradId}
+                        onChange={(e) => setSearchGradId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-850 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCheckGraduation}
+                      disabled={isSearchingGrad}
+                      className="bg-amber-500 hover:bg-amber-600 disabled:bg-amber-800 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-xs transition duration-200 flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                    >
+                      {isSearchingGrad ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-4 h-4" />}
+                      <span>Lihat Hasil Kelulusan</span>
+                    </button>
+                  </div>
+
+                  {gradSearchError && (
+                    <p className="text-xs text-rose-400 bg-rose-950/20 px-3 py-2 rounded-lg border border-rose-900/30 font-mono mt-2">
+                      ⚠ {gradSearchError}
+                    </p>
+                  )}
+
+                  {gradSearchResult && (
+                    <div 
+                      className="mt-4 p-4 rounded-xl border font-mono space-y-4 bg-slate-950/80 border-slate-800"
+                    >
+                      <div className="flex justify-between items-start flex-wrap gap-2">
+                        <div>
+                          <span className="text-[10px] text-slate-500">NAMA CALON MAHASISWA:</span>
+                          <h4 className="text-sm font-bold text-white">{gradSearchResult.name}</h4>
+                          <span className="text-[10px] text-slate-400 font-mono">No ID: {gradSearchResult.id}</span>
+                        </div>
+                        
+                        {gradSearchResult.status.startsWith("Graduated_") ? (
+                          <div className="bg-emerald-950/40 text-emerald-400 border border-emerald-900 px-3 py-1.5 rounded-lg text-xs font-bold text-center animate-bounce">
+                            🎉 DINYATAKAN LULUS SELEKSI!
+                          </div>
+                        ) : gradSearchResult.status === "Rejected" ? (
+                          <div className="bg-rose-950/40 text-rose-400 border border-rose-900 px-3 py-1.5 rounded-lg text-xs font-bold text-center">
+                            Belum Memenuhi Syarat
+                          </div>
+                        ) : (
+                          <div className="bg-slate-900/80 text-amber-400 border border-slate-800 px-3 py-1.5 rounded-lg text-xs font-bold text-center">
+                            Sedang Proses Penilaian
+                          </div>
+                        )}
+                      </div>
+
+                      {gradSearchResult.status.startsWith("Graduated_") ? (
+                        <div className="bg-emerald-950/10 border border-emerald-900/30 p-3 rounded-lg text-[11px] text-emerald-400 leading-relaxed font-sans space-y-2">
+                          <p>
+                            <strong>Selamat!</strong> Anda dinyatakan <strong>LULUS SELEKSI</strong> sebagai Mahasiswa Baru ITB Trenggalek Tahun Akademik 2026/2027 di program studi:
+                          </p>
+                          <p className="text-center font-mono font-bold bg-emerald-950/40 py-2 border border-emerald-900 rounded text-xs text-white">
+                            S1 {gradSearchResult.status.split("Graduated_")[1]?.replace(/_/g, " ")}
+                          </p>
+                          <div className="flex justify-center pt-2">
+                            <button
+                              onClick={() => handleDownloadApplicantPDF(gradSearchResult)}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-[11px] transition duration-200 flex items-center gap-1 cursor-pointer"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Unduh & Cetak Surat Kelulusan (PDF)
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-900/50 p-3 rounded-lg text-[11px] text-slate-400 font-sans">
+                          {gradSearchResult.status === "Rejected" 
+                            ? "Terima kasih telah berpartisipasi. Mohon maaf, berdasarkan evaluasi nilai seleksi berkas & ujian CBT, Anda belum lulus pada periode pendaftaran ini. Tetap semangat!"
+                            : "Pendaftaran Anda sedang dievaluasi oleh tim penguji. Pastikan Anda telah mengunggah seluruh dokumen administrasi dan menyelesaikan ujian CBT serta tes minat bakat AI Anda di portal pendaftaran."
+                          }
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                /* MABA AUTHENTICATION SYSTEM (LOGIN / REGISTRATION) */
+                <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
                 <div className="text-center space-y-2">
                   <div className="inline-flex bg-sky-950/60 p-3 rounded-full text-sky-400 border border-sky-800 mb-2">
                     <BookOpen className="w-8 h-8" />
@@ -1664,15 +3035,37 @@ export default function App() {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-mono">Password</label>
-                      <input
-                        type="password"
-                        placeholder="Masukkan password Anda"
-                        value={mabaPasswordLogin}
-                        onChange={(e) => setMabaPasswordLogin(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-sky-500 text-white"
-                        required
-                      />
+                      <div className="flex justify-between items-center">
+                        <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-mono">Password</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowForgotPassword(true);
+                            setForgotSearchKey(mabaUsernameLogin || "");
+                            setForgotStatus(null);
+                          }}
+                          className="text-[10px] text-sky-400 hover:text-sky-300 transition focus:outline-none cursor-pointer"
+                        >
+                          Lupa Password?
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showMabaPasswordLogin ? "text" : "password"}
+                          placeholder="Masukkan password Anda"
+                          value={mabaPasswordLogin}
+                          onChange={(e) => setMabaPasswordLogin(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-850 rounded-xl pl-3 pr-10 py-2.5 text-xs focus:outline-none focus:border-sky-500 text-white"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowMabaPasswordLogin(!showMabaPasswordLogin)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition focus:outline-none cursor-pointer"
+                        >
+                          {showMabaPasswordLogin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
 
                     {mabaLoginError && (
@@ -1685,7 +3078,7 @@ export default function App() {
                     <button
                       type="submit"
                       disabled={isLoggingInMaba}
-                      className="w-full bg-sky-600 hover:bg-sky-700 disabled:bg-sky-800 text-white font-bold py-2.5 rounded-xl text-xs transition duration-200 flex items-center justify-center gap-2 shadow-lg"
+                      className="w-full bg-sky-600 hover:bg-sky-700 disabled:bg-sky-800 text-white font-bold py-2.5 rounded-xl text-xs transition duration-200 flex items-center justify-center gap-2 shadow-lg cursor-pointer"
                     >
                       {isLoggingInMaba ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
                       <span>Masuk ke Portal PMB</span>
@@ -1710,14 +3103,23 @@ export default function App() {
                       </div>
                       <div className="space-y-1">
                         <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-mono">Password Maba</label>
-                        <input
-                          type="password"
-                          placeholder="Buat password"
-                          value={mabaPasswordReg}
-                          onChange={(e) => setMabaPasswordReg(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 text-white"
-                          required
-                        />
+                        <div className="relative">
+                          <input
+                            type={showMabaPasswordReg ? "text" : "password"}
+                            placeholder="Buat password"
+                            value={mabaPasswordReg}
+                            onChange={(e) => setMabaPasswordReg(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-850 rounded-xl pl-3 pr-10 py-2 text-xs focus:outline-none focus:border-emerald-500 text-white"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowMabaPasswordReg(!showMabaPasswordReg)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition focus:outline-none cursor-pointer"
+                          >
+                            {showMabaPasswordReg ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1815,6 +3217,7 @@ export default function App() {
                   </form>
                 )}
               </div>
+              </>
             ) : (
               /* PORTAL MAIN AREA - DISPLAYED ONLY WHEN MABA LOGGED IN */
               <div className="space-y-6 animate-fade-in">
@@ -1906,7 +3309,7 @@ export default function App() {
                       <div className="text-xs text-slate-300 font-mono space-y-3">
                         <p className="text-slate-400 font-sans">Jam Operasional: 08:00 - 16:00 WIB</p>
                         <a
-                          href="https://wa.me/6285648730190"
+                          href="https://wa.me/6281337153493"
                           target="_blank"
                           rel="noopener noreferrer"
                           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl text-center block text-xs shadow transition duration-200"
@@ -2000,32 +3403,58 @@ export default function App() {
                             </div>
 
                             {currentApplicant.payment.status === "Pending" ? (
-                              <div className="bg-slate-900/80 p-3.5 rounded-lg border border-slate-800 space-y-3">
-                                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                                  <div>
-                                    <span className="text-slate-500">Metode Bayar:</span>
-                                    <p className="text-slate-200 font-bold">{currentApplicant.payment.method}</p>
-                                  </div>
-                                  <div>
-                                    <span className="text-slate-500">Nomor VA Bank:</span>
-                                    <p className="text-sky-400 font-bold tracking-wider">{currentApplicant.payment.vaNumber}</p>
+                              <div className="bg-slate-900/80 p-4 rounded-lg border border-slate-800 space-y-4">
+                                <div className="bg-amber-950/20 border border-amber-900/50 p-3 rounded text-[11px] text-amber-300 leading-normal">
+                                  <strong>Pembayaran via Berkas PDF:</strong> Untuk melanjutkan pendaftaran, silakan unggah berkas bukti pembayaran pendaftaran atau slip pembayaran dalam format <strong>PDF</strong>.
+                                </div>
+                                
+                                <div className="space-y-2">
+                                  <label className="block text-[10px] text-slate-400 font-mono tracking-wider">UNGGAH BUKTI BAYAR (PDF)</label>
+                                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-center hover:border-emerald-500 transition relative">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={handlePaymentFileUpload}
+                                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                      disabled={uploadingDoc}
+                                    />
+                                    <div className="flex flex-col items-center justify-center space-y-2">
+                                      <Upload className="w-5 h-5 text-emerald-400 shrink-0" />
+                                      <span className="text-xs text-slate-300 font-semibold">
+                                        {uploadingDoc ? "Mengunggah Berkas..." : "Pilih atau Seret Berkas Bukti PDF"}
+                                      </span>
+                                      <span className="text-[9px] text-slate-500 font-mono">Format: PDF (Maks. 5MB)</span>
+                                    </div>
                                   </div>
                                 </div>
-                                <div className="bg-amber-950/30 border border-amber-900/50 p-2.5 rounded text-[11px] text-amber-300 leading-normal">
-                                  <strong>Cara Pembayaran:</strong> Transfer sebesar Rp 150.000 ke rekening Virtual Account di atas menggunakan ATM, m-Banking, atau Internet Banking.
-                                </div>
-                                <div className="flex justify-end pt-1">
+
+                                <div className="flex justify-between items-center pt-2 border-t border-slate-800/60">
+                                  <span className="text-[10px] text-slate-500 font-mono">Simulasi pembayaran instan:</span>
                                   <button
                                     onClick={handleSimulatePayment}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-lg text-[11px] transition shadow"
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] transition font-semibold font-mono"
                                   >
-                                    Simulasikan Pembayaran Instan via Bank
+                                    Sahkan Lunas Instan
                                   </button>
                                 </div>
                               </div>
                             ) : (
-                              <div className="bg-emerald-950/20 border border-emerald-900/30 p-3 rounded-lg text-[11px] text-emerald-400 font-mono">
-                                Pembayaran lunas diterima pada: {new Date(currentApplicant.payment.paidAt || "").toLocaleString("id-ID")}
+                              <div className="bg-emerald-950/20 border border-emerald-900/30 p-3.5 rounded-lg text-xs flex flex-col gap-1.5">
+                                <div className="text-emerald-400 font-mono font-bold flex items-center gap-1.5">
+                                  <CheckCircle className="w-4 h-4 shrink-0" /> Pembayaran Terverifikasi (LUNAS)
+                                </div>
+                                <p className="text-[11px] text-slate-400">Diterima pada: {new Date(currentApplicant.payment.paidAt || "").toLocaleString("id-ID")}</p>
+                                {currentApplicant.payment.buktiBayar && (
+                                  <div className="bg-slate-900 p-2 rounded border border-slate-800 flex justify-between items-center text-[10px] text-slate-300 mt-1 font-mono">
+                                    <span className="truncate">📄 {currentApplicant.payment.buktiBayar.name} ({currentApplicant.payment.buktiBayar.size})</span>
+                                    <button 
+                                      onClick={() => handleDownloadApplicantFile(currentApplicant, "bukti_bayar")}
+                                      className="text-sky-400 hover:text-sky-300 font-semibold cursor-pointer"
+                                    >
+                                      Unduh Berkas Bukti
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2061,50 +3490,101 @@ export default function App() {
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                   
                                   {/* Doc 1: Ijazah */}
-                                  <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-center space-y-2">
-                                    <span className="text-[10px] text-slate-400 uppercase font-mono">Ijazah / SKL (PDF)</span>
-                                    {uploadedFiles.ijazah ? (
-                                      <p className="text-xs text-emerald-400 font-semibold truncate">✓ {uploadedFiles.ijazah}</p>
+                                  <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-center space-y-2 relative">
+                                    <span className="text-[10px] text-slate-400 uppercase font-mono block">Ijazah / SKL (PDF)</span>
+                                    {(currentApplicant.documents?.ijazah || uploadedFiles.ijazah) ? (
+                                      <div className="space-y-1">
+                                        <p className="text-xs text-emerald-400 font-semibold truncate">✓ {currentApplicant.documents?.ijazah?.name || uploadedFiles.ijazah}</p>
+                                        <button 
+                                          onClick={() => handleDownloadApplicantFile(currentApplicant, "ijazah")}
+                                          className="text-[9px] text-sky-400 hover:underline cursor-pointer"
+                                        >
+                                          Unduh Berkas
+                                        </button>
+                                      </div>
                                     ) : (
-                                      <button
-                                        onClick={() => handleFileUploadMock("ijazah", `ijazah_${currentApplicant.name.toLowerCase().replace(/\s/g, "_")}.pdf`)}
-                                        disabled={uploadingDoc}
-                                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-1.5 rounded text-[10px] transition flex items-center justify-center gap-1"
-                                      >
-                                        <Upload className="w-3 h-3" /> Unggah PDF
-                                      </button>
+                                      <div className="relative">
+                                        <input
+                                          type="file"
+                                          accept="application/pdf"
+                                          onChange={(e) => handleRealFileUpload(e, "ijazah")}
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                          disabled={uploadingDoc}
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={uploadingDoc}
+                                          className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-1.5 rounded text-[10px] transition flex items-center justify-center gap-1 cursor-pointer"
+                                        >
+                                          <Upload className="w-3 h-3" /> Pilih PDF Ijazah
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
 
                                   {/* Doc 2: KTP / KK */}
-                                  <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-center space-y-2">
-                                    <span className="text-[10px] text-slate-400 uppercase font-mono">KTP / Kartu Keluarga</span>
-                                    {uploadedFiles.ktp ? (
-                                      <p className="text-xs text-emerald-400 font-semibold truncate">✓ {uploadedFiles.ktp}</p>
+                                  <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-center space-y-2 relative">
+                                    <span className="text-[10px] text-slate-400 uppercase font-mono block">KTP / Kartu Keluarga</span>
+                                    {(currentApplicant.documents?.ktp || uploadedFiles.ktp) ? (
+                                      <div className="space-y-1">
+                                        <p className="text-xs text-emerald-400 font-semibold truncate">✓ {currentApplicant.documents?.ktp?.name || uploadedFiles.ktp}</p>
+                                        <button 
+                                          onClick={() => handleDownloadApplicantFile(currentApplicant, "ktp")}
+                                          className="text-[9px] text-sky-400 hover:underline cursor-pointer"
+                                        >
+                                          Unduh Berkas
+                                        </button>
+                                      </div>
                                     ) : (
-                                      <button
-                                        onClick={() => handleFileUploadMock("ktp", `ktp_${currentApplicant.name.toLowerCase().replace(/\s/g, "_")}.pdf`)}
-                                        disabled={uploadingDoc}
-                                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-1.5 rounded text-[10px] transition flex items-center justify-center gap-1"
-                                      >
-                                        <Upload className="w-3 h-3" /> Unggah PDF
-                                      </button>
+                                      <div className="relative">
+                                        <input
+                                          type="file"
+                                          accept="application/pdf,image/*"
+                                          onChange={(e) => handleRealFileUpload(e, "ktp")}
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                          disabled={uploadingDoc}
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={uploadingDoc}
+                                          className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-1.5 rounded text-[10px] transition flex items-center justify-center gap-1 cursor-pointer"
+                                        >
+                                          <Upload className="w-3 h-3" /> Pilih Berkas KTP
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
 
                                   {/* Doc 3: Pasfoto */}
-                                  <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-center space-y-2">
-                                    <span className="text-[10px] text-slate-400 uppercase font-mono">Pasfoto 3x4 (Image)</span>
-                                    {uploadedFiles.foto ? (
-                                      <p className="text-xs text-emerald-400 font-semibold truncate">✓ {uploadedFiles.foto}</p>
+                                  <div className="bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-center space-y-2 relative">
+                                    <span className="text-[10px] text-slate-400 uppercase font-mono block">Pasfoto 3x4 (Image)</span>
+                                    {(currentApplicant.documents?.foto || uploadedFiles.foto) ? (
+                                      <div className="space-y-1">
+                                        <p className="text-xs text-emerald-400 font-semibold truncate">✓ {currentApplicant.documents?.foto?.name || uploadedFiles.foto}</p>
+                                        <button 
+                                          onClick={() => handleDownloadApplicantFile(currentApplicant, "foto")}
+                                          className="text-[9px] text-sky-400 hover:underline cursor-pointer"
+                                        >
+                                          Unduh Foto
+                                        </button>
+                                      </div>
                                     ) : (
-                                      <button
-                                        onClick={() => handleFileUploadMock("foto", `foto_formal_${currentApplicant.name.toLowerCase().replace(/\s/g, "_")}.jpg`)}
-                                        disabled={uploadingDoc}
-                                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-1.5 rounded text-[10px] transition flex items-center justify-center gap-1"
-                                      >
-                                        <Upload className="w-3 h-3" /> Unggah JPG/PNG
-                                      </button>
+                                      <div className="relative">
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          onChange={(e) => handleRealFileUpload(e, "foto")}
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                          disabled={uploadingDoc}
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={uploadingDoc}
+                                          className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-1.5 rounded text-[10px] transition flex items-center justify-center gap-1 cursor-pointer"
+                                        >
+                                          <Upload className="w-3 h-3" /> Pilih Pasfoto JPG
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
 
@@ -2330,10 +3810,8 @@ export default function App() {
                                     Surat Keputusan (SK) Kelulusan Anda telah diterbitkan secara sah oleh panitia PMB.
                                   </p>
                                   <button
-                                    onClick={() => {
-                                      alert(`Membuka berkas SK Kelulusan Digital...\nNo Surat: 042/PMB/ITB-TR/2026\nNama: ${currentApplicant.name}\nProgram Studi: ${currentApplicant.status.split("Graduated_")[1]?.replace(/_/g, " ")}\n\n(Simulasi Unduhan PDF Sukses)`);
-                                    }}
-                                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg text-xs transition flex items-center justify-center gap-1.5 shadow"
+                                    onClick={() => handleDownloadApplicantPDF(currentApplicant)}
+                                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg text-xs transition flex items-center justify-center gap-1.5 shadow cursor-pointer"
                                   >
                                     <FileText className="w-4 h-4" />
                                     <span>Unduh Surat Kelulusan Resmi (PDF)</span>
@@ -3349,12 +4827,12 @@ export default function App() {
                       <div className="space-y-0.5">
                         <p className="font-bold text-slate-300">WhatsApp Admisi (Fast Response)</p>
                         <a 
-                          href="https://wa.me/6285648730190" 
+                          href="https://wa.me/6281337153493" 
                           target="_blank" 
                           rel="noopener noreferrer" 
                           className="text-emerald-400 font-mono hover:underline block"
                         >
-                          +62 856-4873-0190
+                          +62 813-3715-3493
                         </a>
                         <p className="text-[10px] text-slate-400">Aktif Senin - Sabtu: 08:00 - 16:00 WIB</p>
                       </div>
@@ -3367,10 +4845,10 @@ export default function App() {
                       <div className="space-y-0.5">
                         <p className="font-bold text-slate-300">E-mail Admisi</p>
                         <a 
-                          href="mailto:pmb@itbtrenggalek.ac.id" 
+                          href="mailto:pmbitbtrenggalek@gmail.com" 
                           className="text-rose-400 font-mono hover:underline block"
                         >
-                          pmb@itbtrenggalek.ac.id
+                          pmbitbtrenggalek@gmail.com
                         </a>
                       </div>
                     </div>
@@ -3511,6 +4989,123 @@ export default function App() {
               </div>
 
             </div>
+
+            {/* FAQ Section */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 relative overflow-hidden mt-12">
+              <div className="absolute top-0 left-0 -ml-16 -mt-16 w-80 h-80 bg-gradient-to-br from-sky-500/5 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+              
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-850">
+                <div>
+                  <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2 font-sans">
+                    <HelpCircle className="w-5 h-5 text-sky-400" />
+                    Tanya Jawab & Informasi Umum (FAQ)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 font-sans">
+                    Temukan jawaban cepat atas kendala dan pertanyaan seputar pendaftaran PMB ITB Trenggalek di bawah ini.
+                  </p>
+                </div>
+                
+                {/* FAQ Search Bar */}
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                  <input
+                    type="text"
+                    placeholder="Cari pertanyaan..."
+                    value={userFaqSearch}
+                    onChange={(e) => setUserFaqSearch(e.target.value)}
+                    className="bg-slate-950 border border-slate-850 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 w-full sm:w-48 font-sans"
+                  />
+                  <select
+                    value={userFaqCategory}
+                    onChange={(e) => setUserFaqCategory(e.target.value)}
+                    className="bg-slate-950 border border-slate-850 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-sky-500 font-sans cursor-pointer"
+                  >
+                    <option value="All">Semua Kategori</option>
+                    <option value="Pendaftaran">Pendaftaran</option>
+                    <option value="Biaya">Biaya</option>
+                    <option value="Akademik">Akademik</option>
+                    <option value="Sistem Seleksi">Sistem Seleksi</option>
+                    <option value="Beasiswa">Beasiswa</option>
+                    <option value="Lainnya">Lainnya</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* FAQ Accordion List */}
+              {loadingFaqs ? (
+                <div className="text-center py-12 text-slate-500 font-mono text-xs">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-sky-400" />
+                  <span>Memuat daftar pertanyaan...</span>
+                </div>
+              ) : faqs.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 font-sans text-xs">
+                  Belum ada pertanyaan umum yang dipublikasikan.
+                </div>
+              ) : (() => {
+                const filtered = faqs.filter(faq => {
+                  const matchSearch = faq.question.toLowerCase().includes(userFaqSearch.toLowerCase()) || 
+                                      faq.answer.toLowerCase().includes(userFaqSearch.toLowerCase());
+                  const matchCat = userFaqCategory === "All" || faq.category === userFaqCategory;
+                  return matchSearch && matchCat;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-slate-500 font-sans text-xs">
+                      Tidak ada pertanyaan yang sesuai dengan kata kunci atau filter Anda.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-3">
+                    {filtered.map((faq) => {
+                      const isOpen = openFaqId === faq.id;
+                      return (
+                        <div 
+                          key={faq.id} 
+                          className={`border rounded-2xl transition-all duration-200 overflow-hidden ${
+                            isOpen 
+                              ? "bg-slate-950/80 border-sky-500/30 shadow-lg shadow-sky-950/20" 
+                              : "bg-slate-950/30 border-slate-850 hover:border-slate-800"
+                          }`}
+                        >
+                          {/* Accordion Trigger */}
+                          <button
+                            onClick={() => setOpenFaqId(isOpen ? null : faq.id)}
+                            className="w-full flex items-center justify-between p-4 sm:p-5 text-left font-sans cursor-pointer focus:outline-none"
+                          >
+                            <div className="space-y-1 pr-4">
+                              <span className="inline-block px-2 py-0.5 rounded-full bg-sky-950/50 text-[9px] font-bold text-sky-400 border border-sky-900/40 uppercase tracking-wider font-mono">
+                                {faq.category}
+                              </span>
+                              <h4 className={`text-xs sm:text-sm font-semibold transition-colors ${
+                                isOpen ? "text-sky-400" : "text-slate-200 hover:text-white"
+                              }`}>
+                                {faq.question}
+                              </h4>
+                            </div>
+                            <span className={`w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 shrink-0 transition-transform duration-200 ${
+                              isOpen ? "rotate-180 border-sky-500/20 text-sky-400" : ""
+                            }`}>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </span>
+                          </button>
+
+                          {/* Accordion Content */}
+                          <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
+                            isOpen ? "max-h-[300px] border-t border-slate-900" : "max-h-0"
+                          }`}>
+                            <div className="p-4 sm:p-5 bg-slate-950/50 text-xs sm:text-sm text-slate-400 leading-relaxed font-sans whitespace-pre-wrap">
+                              {faq.answer}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 
@@ -3623,7 +5218,54 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Admin Submenu Navigation */}
+            <div className="flex border-b border-slate-800 gap-6">
+              <button
+                onClick={() => setAdminSubTab("applicants")}
+                className={`pb-3 px-1 text-xs sm:text-sm font-semibold transition-all relative cursor-pointer ${
+                  adminSubTab === "applicants"
+                    ? "text-sky-400 border-b-2 border-sky-400 font-bold font-sans"
+                    : "text-slate-400 hover:text-slate-300 font-sans"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  Calon Mahasiswa Baru ({stats.total})
+                </span>
+              </button>
+              <button
+                onClick={() => setAdminSubTab("contacts")}
+                className={`pb-3 px-1 text-xs sm:text-sm font-semibold transition-all relative cursor-pointer ${
+                  adminSubTab === "contacts"
+                    ? "text-sky-400 border-b-2 border-sky-400 font-bold font-sans"
+                    : "text-slate-400 hover:text-slate-300 font-sans"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Pertanyaan & Konsultasi ({contacts.length})
+                  {contacts.some(c => c.status === "Unread") && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse inline-block"></span>
+                  )}
+                </span>
+              </button>
+              <button
+                onClick={() => setAdminSubTab("faq")}
+                className={`pb-3 px-1 text-xs sm:text-sm font-semibold transition-all relative cursor-pointer ${
+                  adminSubTab === "faq"
+                    ? "text-sky-400 border-b-2 border-sky-400 font-bold font-sans"
+                    : "text-slate-400 hover:text-slate-300 font-sans"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4" />
+                  Kelola FAQ ({faqs.length})
+                </span>
+              </button>
+            </div>
+
+            {adminSubTab === "applicants" ? (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
               {/* Left Column: Applicants List Table */}
               <div className="lg:col-span-2 bg-slate-900 rounded-2xl border border-slate-800 p-6 space-y-4">
@@ -3638,13 +5280,24 @@ export default function App() {
                     <p className="text-xs text-slate-400 mt-0.5">Real-time database pendaftaran & hasil seleksi.</p>
                   </div>
 
-                  <button
-                    onClick={fetchAdminApplicants}
-                    className="p-1.5 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700 transition"
-                    title="Refresh Data"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleDownloadCSV}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500 text-xs font-bold transition shadow cursor-pointer"
+                      title="Unduh Rekap Excel / CSV"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Unduh Rekap Excel</span>
+                    </button>
+
+                    <button
+                      onClick={fetchAdminApplicants}
+                      className="p-1.5 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                      title="Refresh Data"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Filter and Search controls */}
@@ -3796,17 +5449,77 @@ export default function App() {
 
                     {/* Documents Checked */}
                     <div className="space-y-2 border-t border-slate-800 pt-3">
-                      <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">Pengecekan Dokumen Persyaratan:</span>
-                      <div className="grid grid-cols-3 gap-2 text-[10px]">
-                        <div className={`p-2 rounded border text-center ${selectedAdminApplicant.documents?.ijazah ? "bg-emerald-950/20 border-emerald-900 text-emerald-400" : "bg-slate-950 border-slate-800 text-slate-600"}`}>
-                          Ijazah/SKL
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">Berkas & Bukti Administrasi (Klik untuk Unduh):</span>
+                      <div className="grid grid-cols-1 gap-2 text-[10px] font-mono">
+                        
+                        {/* Ijazah */}
+                        <div className="flex items-center justify-between p-2 rounded border bg-slate-950 border-slate-800">
+                          <span className="text-slate-400">📄 Ijazah/SKL</span>
+                          {selectedAdminApplicant.documents?.ijazah ? (
+                            <button
+                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "ijazah")}
+                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                            >
+                              Unduh ({selectedAdminApplicant.documents.ijazah.size})
+                            </button>
+                          ) : (
+                            <span className="text-slate-600 italic">Belum diunggah</span>
+                          )}
                         </div>
-                        <div className={`p-2 rounded border text-center ${selectedAdminApplicant.documents?.ktp ? "bg-emerald-950/20 border-emerald-900 text-emerald-400" : "bg-slate-950 border-slate-800 text-slate-600"}`}>
-                          KTP/KK
+
+                        {/* KTP */}
+                        <div className="flex items-center justify-between p-2 rounded border bg-slate-950 border-slate-800">
+                          <span className="text-slate-400">📄 KTP/KK</span>
+                          {selectedAdminApplicant.documents?.ktp ? (
+                            <button
+                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "ktp")}
+                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                            >
+                              Unduh ({selectedAdminApplicant.documents.ktp.size})
+                            </button>
+                          ) : (
+                            <span className="text-slate-600 italic">Belum diunggah</span>
+                          )}
                         </div>
-                        <div className={`p-2 rounded border text-center ${selectedAdminApplicant.documents?.foto ? "bg-emerald-950/20 border-emerald-900 text-emerald-400" : "bg-slate-950 border-slate-800 text-slate-600"}`}>
-                          Pasfoto
+
+                        {/* Pasfoto */}
+                        <div className="flex items-center justify-between p-2 rounded border bg-slate-950 border-slate-800">
+                          <span className="text-slate-400">🖼 Pasfoto 3x4</span>
+                          {selectedAdminApplicant.documents?.foto ? (
+                            <button
+                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "foto")}
+                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                            >
+                              Unduh ({selectedAdminApplicant.documents.foto.size})
+                            </button>
+                          ) : (
+                            <span className="text-slate-600 italic">Belum diunggah</span>
+                          )}
                         </div>
+
+                        {/* Bukti Bayar */}
+                        {selectedAdminApplicant.payment.buktiBayar && (
+                          <div className="flex items-center justify-between p-2 rounded border bg-emerald-950/20 border-emerald-900/50 text-emerald-400">
+                            <span>💸 Bukti Bayar PDF</span>
+                            <button
+                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "bukti_bayar")}
+                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                            >
+                              Unduh ({selectedAdminApplicant.payment.buktiBayar.size})
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Print Card PDF */}
+                        <div className="pt-2">
+                          <button
+                            onClick={() => handleDownloadApplicantPDF(selectedAdminApplicant)}
+                            className="w-full bg-slate-850 hover:bg-slate-800 text-sky-400 font-bold py-2 rounded-lg text-[10px] transition flex items-center justify-center gap-1 cursor-pointer border border-slate-700"
+                          >
+                            <Download className="w-3 h-3" /> Cetak Kartu PMB & Surat Kelulusan (PDF)
+                          </button>
+                        </div>
+
                       </div>
                     </div>
 
@@ -3917,6 +5630,331 @@ export default function App() {
               </div>
 
             </div>
+            ) : adminSubTab === "contacts" ? (
+              /* Contacts / Consultations Tab View */
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+                
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2 font-sans">
+                      <MessageSquare className="w-5 h-5 text-sky-400" />
+                      Layanan Pertanyaan & Konsultasi
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1 font-sans">Daftar pertanyaan dan kendala yang dikirimkan calon mahasiswa melalui formulir beranda.</p>
+                  </div>
+                  <button
+                    onClick={fetchContacts}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition shadow cursor-pointer font-sans"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingContacts ? "animate-spin" : ""}`} />
+                    <span>Perbarui Pesan</span>
+                  </button>
+                </div>
+
+                {loadingContacts ? (
+                  <div className="text-center py-12 text-slate-500 font-mono text-xs">
+                    <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2 text-sky-400" />
+                    <span>Memuat daftar pertanyaan...</span>
+                  </div>
+                ) : contacts.length === 0 ? (
+                  <div className="text-center py-16 text-slate-500 font-mono text-xs flex flex-col items-center justify-center">
+                    <MessageSquare className="w-10 h-10 mb-2 text-slate-700" />
+                    <span>Belum ada pertanyaan atau konsultasi masuk dari calon mahasiswa.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                    {contacts.map((c) => {
+                      const isUnread = c.status === "Unread";
+                      const isResponded = c.status === "Responded";
+                      
+                      return (
+                        <div 
+                          key={c.id} 
+                          className={`border rounded-2xl p-5 space-y-4 transition-all duration-200 ${
+                            isUnread 
+                              ? "bg-rose-950/10 border-rose-500/20 shadow-lg shadow-rose-950/5" 
+                              : isResponded 
+                                ? "bg-emerald-950/10 border-emerald-500/20" 
+                                : "bg-slate-950/40 border-slate-800/80"
+                          }`}
+                        >
+                          {/* Message Header */}
+                          <div className="flex flex-col sm:flex-row justify-between items-start gap-3 border-b border-slate-800/60 pb-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-white text-sm sm:text-base font-sans">{c.name}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {new Date(c.createdAt).toLocaleString("id-ID")}
+                                </span>
+                              </div>
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-x-3 gap-y-1 text-xs text-slate-400 font-sans">
+                                <span className="flex items-center gap-1.5">
+                                  <Mail className="w-3.5 h-3.5 text-slate-500" />
+                                  {c.email}
+                                </span>
+                                <span className="flex items-center gap-1.5">
+                                  <Phone className="w-3.5 h-3.5 text-slate-500" />
+                                  {c.phone}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2">
+                              {/* Status Badge */}
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${
+                                isUnread 
+                                  ? "bg-rose-500/10 text-rose-400 border-rose-500/20" 
+                                  : isResponded 
+                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                                    : "bg-slate-850 text-slate-400 border-slate-700"
+                              }`}>
+                                {isUnread ? "BELUM DIBACA" : isResponded ? "SUDAH DITANGGAPI" : "SUDAH DIBACA"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Message Body */}
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold text-slate-300 font-mono">Subjek: {c.subject}</p>
+                            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/60 text-slate-300 text-xs sm:text-sm whitespace-pre-wrap leading-relaxed font-sans">
+                              {c.message}
+                            </div>
+                          </div>
+
+                          {/* Message Actions */}
+                          <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-1">
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                              {isUnread && (
+                                <button
+                                  onClick={() => handleUpdateContactStatus(c.id, "Read")}
+                                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition cursor-pointer font-sans"
+                                >
+                                  Tandai Dibaca
+                                </button>
+                              )}
+                              {!isResponded && (
+                                <button
+                                  onClick={() => handleUpdateContactStatus(c.id, "Responded")}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-400 text-xs font-semibold border border-emerald-500/20 transition cursor-pointer font-sans"
+                                >
+                                  Tandai Ditanggapi
+                                </button>
+                              )}
+                              {isResponded && (
+                                <button
+                                  onClick={() => handleUpdateContactStatus(c.id, "Read")}
+                                  className="px-3 py-1.5 rounded-lg bg-slate-800/65 hover:bg-slate-800 text-slate-400 text-xs font-semibold border border-slate-700/60 transition cursor-pointer font-sans"
+                                >
+                                  Batalkan Ditanggapi
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="flex gap-2 w-full sm:w-auto">
+                              <a
+                                href={`https://wa.me/${c.phone.replace(/[^0-9]/g, "").replace(/^0/, "62")}?text=${encodeURIComponent(
+                                  `Halo Kak ${c.name}, terima kasih telah menghubungi PMB ITB Trenggalek terkait pertanyaan "${c.subject}".\n\n`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow font-sans"
+                              >
+                                <Phone className="w-3.5 h-3.5" />
+                                <span>Balas WA</span>
+                              </a>
+                              <a
+                                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${c.email}&su=${encodeURIComponent(`RE: ${c.subject}`)}&body=${encodeURIComponent(
+                                  `Halo Kak ${c.name},\n\nTerima kasih telah menghubungi kami.\n\n--\nPanitia PMB ITB Trenggalek`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition font-sans"
+                              >
+                                <Mail className="w-3.5 h-3.5" />
+                                <span>Balas Email</span>
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* FAQ Management View */
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 bg-gradient-to-bl from-sky-500/10 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+                
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2 font-sans">
+                      <HelpCircle className="w-5 h-5 text-sky-400" />
+                      Kelola Tanya Jawab (FAQ)
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1 font-sans">Tambah, edit, dan hapus daftar FAQ yang ditampilkan ke pendaftar.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 pt-2">
+                  {/* Form Tambah/Edit FAQ (Left: 5 cols) */}
+                  <div className="lg:col-span-5 bg-slate-950/40 border border-slate-850 p-6 rounded-2xl space-y-4">
+                    <h4 className="text-sm font-bold text-white flex items-center gap-1.5 font-sans">
+                      {editingFaq ? (
+                        <>
+                          <Edit3 className="w-4 h-4 text-amber-400" />
+                          <span>Edit Pertanyaan FAQ</span>
+                        </>
+                      ) : (
+                        <>
+                          <PlusCircle className="w-4 h-4 text-sky-400" />
+                          <span>Tambah FAQ Baru</span>
+                        </>
+                      )}
+                    </h4>
+                    <form onSubmit={handleSaveFaq} className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-mono">Kategori FAQ</label>
+                        <select
+                          value={faqFormCategory}
+                          onChange={(e) => setFaqFormCategory(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-850 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-sky-500 text-slate-200"
+                        >
+                          <option value="Pendaftaran">Pendaftaran</option>
+                          <option value="Biaya">Biaya</option>
+                          <option value="Akademik">Akademik</option>
+                          <option value="Sistem Seleksi">Sistem Seleksi</option>
+                          <option value="Beasiswa">Beasiswa</option>
+                          <option value="Lainnya">Lainnya</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-mono">Pertanyaan (Question)</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: Apakah ada beasiswa prestasi?"
+                          value={faqFormQuestion}
+                          onChange={(e) => setFaqFormQuestion(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-850 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-sky-500 text-white font-sans"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[11px] text-slate-400 uppercase tracking-wider font-mono">Jawaban (Answer)</label>
+                        <textarea
+                          rows={6}
+                          placeholder="Tuliskan jawaban yang detail, lengkap, dan informatif..."
+                          value={faqFormAnswer}
+                          onChange={(e) => setFaqFormAnswer(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-850 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-sky-500 text-slate-200 font-sans leading-relaxed"
+                          required
+                        />
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="submit"
+                          disabled={isSavingFaq}
+                          className="flex-1 bg-sky-600 hover:bg-sky-500 disabled:bg-sky-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer font-sans"
+                        >
+                          {isSavingFaq ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckSquare className="w-4 h-4" />
+                          )}
+                          <span>{editingFaq ? "Simpan Perubahan" : "Tambahkan FAQ"}</span>
+                        </button>
+                        
+                        {editingFaq && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFaq(null);
+                              setFaqFormQuestion("");
+                              setFaqFormAnswer("");
+                              setFaqFormCategory("Pendaftaran");
+                            }}
+                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer font-sans"
+                          >
+                            Batal
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* FAQ List (Right: 7 cols) */}
+                  <div className="lg:col-span-7 space-y-4">
+                    <div className="flex justify-between items-center gap-4">
+                      <h4 className="text-sm font-bold text-white font-sans flex items-center gap-2">
+                        <HelpCircle className="w-4 h-4 text-sky-400" />
+                        Daftar FAQ Aktif ({faqs.length})
+                      </h4>
+                      <button
+                        onClick={fetchFaqs}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-750 text-xs transition cursor-pointer font-sans"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingFaqs ? "animate-spin" : ""}`} />
+                        <span>Segarkan</span>
+                      </button>
+                    </div>
+
+                    {loadingFaqs ? (
+                      <div className="text-center py-12 text-slate-500 font-mono text-xs">
+                        <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2 text-sky-400" />
+                        <span>Memuat FAQ...</span>
+                      </div>
+                    ) : faqs.length === 0 ? (
+                      <div className="text-center py-16 text-slate-500 font-mono text-xs border border-slate-850 rounded-2xl bg-slate-950/20">
+                        <HelpCircle className="w-10 h-10 mx-auto mb-2 text-slate-700" />
+                        <span>Belum ada FAQ yang dibuat. Silakan tambahkan pertanyaan baru di panel kiri.</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scrollbar">
+                        {faqs.map((faq) => (
+                          <div key={faq.id} className="bg-slate-950/40 border border-slate-850 rounded-2xl p-5 space-y-3 hover:border-slate-800/80 transition">
+                            <div className="flex justify-between items-start gap-4">
+                              <span className="px-2.5 py-0.5 rounded-full bg-sky-950 text-[10px] font-bold text-sky-400 border border-sky-900/40 uppercase tracking-wider font-mono">
+                                {faq.category}
+                              </span>
+                              <div className="flex gap-1.5 shrink-0">
+                                <button
+                                  onClick={() => {
+                                    setEditingFaq(faq);
+                                    setFaqFormQuestion(faq.question);
+                                    setFaqFormAnswer(faq.answer);
+                                    setFaqFormCategory(faq.category);
+                                  }}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-sky-400 border border-slate-700 transition cursor-pointer"
+                                  title="Edit FAQ"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFaq(faq.id)}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400 border border-slate-700 transition cursor-pointer"
+                                  title="Hapus FAQ"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <h5 className="font-bold text-white text-sm leading-snug font-sans">{faq.question}</h5>
+                              <p className="text-xs sm:text-sm text-slate-400 mt-2 leading-relaxed whitespace-pre-wrap font-sans">{faq.answer}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
           </div>
         )}
 
@@ -4050,7 +6088,7 @@ export default function App() {
                   <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
                   <p className="text-[11px] sm:text-xs">
                     <strong className="text-white block font-semibold">WhatsApp PMB:</strong>
-                    <a href="https://wa.me/6285648730190" target="_blank" rel="noopener noreferrer" className="hover:text-white hover:underline transition">0856-4873-0190</a>
+                    <a href="https://wa.me/6281337153493" target="_blank" rel="noopener noreferrer" className="hover:text-white hover:underline transition">0813-3715-3493</a>
                   </p>
                 </div>
                 <div className="flex gap-2.5 items-center">
@@ -4114,7 +6152,7 @@ export default function App() {
                     <Youtube className="w-4 h-4" />
                   </a>
                   <a 
-                    href="https://wa.me/6285648730190" 
+                    href="https://wa.me/6281337153493" 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-emerald-950/40 border border-slate-700/60 hover:border-emerald-500/30 text-slate-300 hover:text-emerald-400 flex items-center justify-center transition"
@@ -4299,6 +6337,99 @@ export default function App() {
                 Ya, Keluar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Forgot Password Modal */}
+      {showForgotPassword && (
+        <div 
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[60] flex items-center justify-center p-4 transition-all duration-300 animate-in fade-in"
+          onClick={() => setShowForgotPassword(false)}
+        >
+          <div 
+            className="relative max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(false)}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-200 transition focus:outline-none cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex flex-col items-center text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center">
+                <Key className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-white">Lupa Password Maba</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Masukkan Username atau Email aktif yang terdaftar pada akun Maba Anda untuk melihat dan memulihkan password.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleMabaForgotPassword} className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <label className="block text-[10px] text-slate-400 uppercase tracking-wider font-mono">Username atau Email</label>
+                <input
+                  type="text"
+                  placeholder="Masukkan username atau email Anda"
+                  value={forgotSearchKey}
+                  onChange={(e) => setForgotSearchKey(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-sky-500 text-white font-mono"
+                  required
+                />
+              </div>
+
+              {forgotStatus && (
+                <div className={`p-3 rounded-xl border text-xs leading-relaxed space-y-1 ${
+                  forgotStatus.type === "success" 
+                    ? "bg-emerald-950/20 border-emerald-900/40 text-emerald-300" 
+                    : "bg-rose-950/20 border-rose-900/40 text-rose-300"
+                }`}>
+                  <p className="font-semibold flex items-center gap-1">
+                    {forgotStatus.type === "success" ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+                    {forgotStatus.text}
+                  </p>
+                  {forgotStatus.password && (
+                    <div className="mt-2 pt-2 border-t border-emerald-900/30 bg-slate-950/60 p-2.5 rounded-lg space-y-1.5 font-mono">
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">Username:</span>
+                        <span className="text-white font-bold">{forgotSearchKey}</span>
+                      </div>
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-slate-400">Password Akun:</span>
+                        <span className="text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 select-all">{forgotStatus.password}</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400 pt-1 text-center font-sans">
+                        (Detail ini juga dikirimkan melalui WhatsApp &amp; Email simulasi di tab sebelah kanan)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl text-xs transition border border-slate-700 cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingForgot}
+                  className="flex-1 bg-sky-600 hover:bg-sky-700 disabled:bg-sky-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {isSubmittingForgot ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>Pulihkan Akun</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
