@@ -1,0 +1,6 @@
+{
+  "name": "PMB ITB Trenggalek",
+  "description": "Sistem Informasi Penerimaan Mahasiswa Baru Institut Teknologi dan Bisnis Trenggalek yang dilengkapi pendaftaran online, tes seleksi, tes bakat minat dengan AI, unggah dokumen, tanda tangan digital, dan pembayaran terintegrasi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
