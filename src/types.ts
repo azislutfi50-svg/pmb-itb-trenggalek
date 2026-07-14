@@ -32,6 +32,8 @@ export interface Applicant {
   prodi2: string;
   createdAt: string;
   status: ApplicantStatus;
+  mabaUsername?: string;
+  mabaPassword?: string;
   payment: {
     method: string;
     vaNumber: string;

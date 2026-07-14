@@ -6,6 +6,97 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+
+let firestoreDb: any = null;
+try {
+  if (fs.existsSync("firebase-applet-config.json")) {
+    const firebaseConfig = JSON.parse(fs.readFileSync("firebase-applet-config.json", "utf-8"));
+    const firebaseApp = initializeApp(firebaseConfig);
+    firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId || "(default)");
+  }
+} catch (e) {
+  console.error("Firebase config not found or invalid. Proceeding with in-memory DB.");
+}
+
+let inMemoryDb: any = null;
+
+export async function initFirestoreDb() {
+  if (!firestoreDb) {
+    inMemoryDb = { applicants: DEFAULT_APPLICANTS, notifications: DEFAULT_NOTIFICATIONS, mabaAccounts: DEFAULT_MABA_ACCOUNTS, contacts: DEFAULT_CONTACTS, faqs: DEFAULT_FAQS };
+    return;
+  }
+  try {
+    const snap = await getDoc(doc(firestoreDb, "database", "main"));
+    if (snap.exists()) {
+      const data = snap.data();
+      // Restore base64
+      for (const app of (data.applicants || [])) {
+         if (app.signature === "stored_in_signatures_col") {
+             const sigSnap = await getDoc(doc(firestoreDb, "signatures", app.id));
+             if (sigSnap.exists()) app.signature = sigSnap.data().base64;
+         }
+         if (app.documents) {
+             for (const key of Object.keys(app.documents)) {
+                 if (app.documents[key].base64 === "stored_in_documents_col") {
+                     const docSnap = await getDoc(doc(firestoreDb, "documents", `${app.id}_${key}`));
+                     if (docSnap.exists()) app.documents[key].base64 = docSnap.data().base64;
+                 }
+             }
+         }
+         if (app.payment?.buktiBayar?.base64 === "stored_in_documents_col") {
+             const docSnap = await getDoc(doc(firestoreDb, "documents", `${app.id}_buktiBayar`));
+             if (docSnap.exists()) app.payment.buktiBayar.base64 = docSnap.data().base64;
+         }
+      }
+      inMemoryDb = data;
+    } else {
+      inMemoryDb = { applicants: DEFAULT_APPLICANTS, notifications: DEFAULT_NOTIFICATIONS, mabaAccounts: DEFAULT_MABA_ACCOUNTS, contacts: DEFAULT_CONTACTS, faqs: DEFAULT_FAQS };
+    }
+    console.log("Loaded DB from Firestore.");
+  } catch (err) {
+    console.error("Failed to load from Firestore", err);
+    inMemoryDb = { applicants: DEFAULT_APPLICANTS, notifications: DEFAULT_NOTIFICATIONS, mabaAccounts: DEFAULT_MABA_ACCOUNTS, contacts: DEFAULT_CONTACTS, faqs: DEFAULT_FAQS };
+  }
+}
+
+function readDatabase() {
+  return inMemoryDb;
+}
+
+function saveDatabase(data: any) {
+  inMemoryDb = data;
+  if (!firestoreDb) return;
+  
+  (async () => {
+    try {
+       const dbToSave = JSON.parse(JSON.stringify(data));
+       for (const app of dbToSave.applicants) {
+           if (app.signature && app.signature.startsWith("data:image")) {
+               await setDoc(doc(firestoreDb, "signatures", app.id), { base64: app.signature });
+               app.signature = "stored_in_signatures_col";
+           }
+           if (app.documents) {
+               for (const key of Object.keys(app.documents)) {
+                   if (app.documents[key].base64 && app.documents[key].base64.startsWith("data:")) {
+                       await setDoc(doc(firestoreDb, "documents", `${app.id}_${key}`), { base64: app.documents[key].base64 });
+                       app.documents[key].base64 = "stored_in_documents_col";
+                   }
+               }
+           }
+           if (app.payment?.buktiBayar?.base64 && app.payment.buktiBayar.base64.startsWith("data:")) {
+               await setDoc(doc(firestoreDb, "documents", `${app.id}_buktiBayar`), { base64: app.payment.buktiBayar.base64 });
+               app.payment.buktiBayar.base64 = "stored_in_documents_col";
+           }
+       }
+       await setDoc(doc(firestoreDb, "database", "main"), dbToSave);
+    } catch (err) {
+       console.error("Failed to sync to Firestore", err);
+    }
+  })();
+}
+
 
 const app = express();
 const PORT = 3000;
@@ -16,187 +107,13 @@ app.use(express.json({ limit: "15mb" }));
 const DB_FILE = path.join(process.cwd(), "db.json");
 
 // Default initial data for PMB ITB Trenggalek
-const DEFAULT_APPLICANTS = [
-  {
-    id: "ITB-2026-0001",
-    name: "Aditya Pratama",
-    email: "aditya.pratama@gmail.com",
-    whatsapp: "081234567890",
-    school: "SMAN 1 Trenggalek",
-    prodi1: "S1 Ilmu Komputer (Fakultas Sains & Teknologi)",
-    prodi2: "S1 Bisnis Digital (Fakultas Ekonomi & Bisnis)",
-    createdAt: "2026-07-10T10:00:00.000Z",
-    status: "Graduated_Ilmu_Komputer",
-    payment: {
-      method: "Virtual Account BNI",
-      vaNumber: "9880856487301001",
-      amount: 150000,
-      status: "Paid",
-      paidAt: "2026-07-10T10:15:00.000Z"
-    },
-    documents: {
-      ijazah: { name: "ijazah_aditya.pdf", size: "1.2 MB", uploadedAt: "2026-07-10T10:30:00.000Z" },
-      ktp: { name: "ktp_aditya.png", size: "350 KB", uploadedAt: "2026-07-10T10:31:00.000Z" },
-      foto: { name: "foto_aditya.jpg", size: "420 KB", uploadedAt: "2026-07-10T10:32:00.000Z" }
-    },
-    signature: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    exam: {
-      startedAt: "2026-07-10T11:00:00.000Z",
-      completedAt: "2026-07-10T11:45:00.000Z",
-      answers: {},
-      score: 85,
-      passed: true
-    },
-    interestTest: {
-      recommendation: {
-        primaryProdi: "S1 Ilmu Komputer (Fakultas Sains & Teknologi)",
-        explanation: "Aditya menunjukkan minat yang sangat kuat pada pemrograman, algoritma dasar, dan pemecahan masalah teknis. Sangat cocok diletakkan di program studi Ilmu Komputer.",
-        scores: {
-          "Ilmu Komputer": 95,
-          "Manajemen Ritel": 40,
-          "Bisnis Digital": 65
-        }
-      }
-    }
-  },
-  {
-    id: "ITB-2026-0002",
-    name: "Siti Rahmawati",
-    email: "siti.rahma@yahoo.com",
-    whatsapp: "082345678901",
-    school: "SMKN 1 Pogalan",
-    prodi1: "S1 Bisnis Digital (Fakultas Ekonomi & Bisnis)",
-    prodi2: "S1 Manajemen Ritel (Fakultas Ekonomi & Bisnis)",
-    createdAt: "2026-07-11T08:00:00.000Z",
-    status: "ExamCompleted",
-    payment: {
-      method: "Virtual Account Mandiri",
-      vaNumber: "8960856487301002",
-      amount: 150000,
-      status: "Paid",
-      paidAt: "2026-07-11T08:12:00.000Z"
-    },
-    documents: {
-      ijazah: { name: "skl_siti_rahma.pdf", size: "1.8 MB", uploadedAt: "2026-07-11T08:20:00.000Z" },
-      ktp: { name: "ktp_siti.jpg", size: "410 KB", uploadedAt: "2026-07-11T08:22:00.000Z" },
-      foto: { name: "foto_siti.png", size: "280 KB", uploadedAt: "2026-07-11T08:23:00.000Z" }
-    },
-    signature: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    exam: {
-      startedAt: "2026-07-11T09:00:00.000Z",
-      completedAt: "2026-07-11T09:40:00.000Z",
-      score: 75,
-      passed: true
-    }
-  },
-  {
-    id: "ITB-2026-0003",
-    name: "Budi Santoso",
-    email: "budi.santoso@outlook.com",
-    whatsapp: "083456789012",
-    school: "SMAN 2 Karangan",
-    prodi1: "S1 Manajemen Ritel (Fakultas Ekonomi & Bisnis)",
-    prodi2: "S1 Bisnis Digital (Fakultas Ekonomi & Bisnis)",
-    createdAt: "2026-07-11T14:30:00.000Z",
-    status: "Registered",
-    payment: {
-      method: "Virtual Account BRI",
-      vaNumber: "1250856487301003",
-      amount: 150000,
-      status: "Pending"
-    },
-    documents: {}
-  },
-  {
-    id: "ITB-2026-0004",
-    name: "Indah Lestari",
-    email: "indah.lestari@gmail.com",
-    whatsapp: "084567890123",
-    school: "MAN Trenggalek",
-    prodi1: "S1 Bisnis Digital (Fakultas Ekonomi & Bisnis)",
-    prodi2: "S1 Ilmu Komputer (Fakultas Sains & Teknologi)",
-    createdAt: "2026-07-11T15:10:00.000Z",
-    status: "DocumentUploaded",
-    payment: {
-      method: "Virtual Account BCA",
-      vaNumber: "5720856487301004",
-      amount: 150000,
-      status: "Paid",
-      paidAt: "2026-07-11T15:15:00.000Z"
-    },
-    documents: {
-      ijazah: { name: "ijazah_indah.pdf", size: "1.5 MB", uploadedAt: "2026-07-11T15:30:00.000Z" },
-      ktp: { name: "ktp_indah.pdf", size: "980 KB", uploadedAt: "2026-07-11T15:32:00.000Z" },
-      foto: { name: "foto_indah.jpg", size: "510 KB", uploadedAt: "2026-07-11T15:35:00.000Z" }
-    },
-    signature: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-  }
-];
+const DEFAULT_APPLICANTS: any[] = [];
 
-const DEFAULT_NOTIFICATIONS = [
-  {
-    id: "notif-001",
-    type: "WhatsApp",
-    recipient: "081234567890",
-    message: "[PMB ITB Trenggalek] Selamat Aditya Pratama, pendaftaran online Anda berhasil! No Pendaftaran: ITB-2026-0001. Silakan lakukan pembayaran Rp 150.000 ke VA BNI 9880856487301001.",
-    timestamp: "2026-07-10T10:00:05.000Z",
-    status: "Sent"
-  },
-  {
-    id: "notif-002",
-    type: "Email",
-    recipient: "aditya.pratama@gmail.com",
-    message: "Subjek: Pendaftaran PMB ITB Trenggalek Berhasil!\n\nHalo Aditya Pratama, terima kasih telah mendaftar di Institut Teknologi dan Bisnis Trenggalek. No pendaftaran Anda adalah ITB-2026-0001.",
-    timestamp: "2026-07-10T10:00:10.000Z",
-    status: "Sent"
-  },
-  {
-    id: "notif-003",
-    type: "WhatsApp",
-    recipient: "081234567890",
-    message: "[PMB ITB Trenggalek] Pembayaran pendaftaran untuk ITB-2026-0001 telah kami terima. Status pendaftaran Anda kini: PAID. Silakan unggah dokumen persyaratan di portal PMB.",
-    timestamp: "2026-07-10T10:15:05.000Z",
-    status: "Sent"
-  },
-  {
-    id: "notif-004",
-    type: "WhatsApp",
-    recipient: "081234567890",
-    message: "[PMB ITB Trenggalek] Selamat Aditya Pratama! Anda dinyatakan LULUS pada program studi S1 Ilmu Komputer (Fakultas Sains & Teknologi). Silakan lakukan daftar ulang.",
-    timestamp: "2026-07-10T15:00:00.000Z",
-    status: "Sent"
-  }
-];
+const DEFAULT_NOTIFICATIONS: any[] = [];
 
-const DEFAULT_MABA_ACCOUNTS = [
-  { username: "aditya", password: "aditya123", name: "Aditya Pratama", email: "aditya.pratama@gmail.com", whatsapp: "081234567890", applicantId: "ITB-2026-0001" },
-  { username: "siti", password: "siti123", name: "Siti Rahmawati", email: "siti.rahma@yahoo.com", whatsapp: "082345678901", applicantId: "ITB-2026-0002" },
-  { username: "budi", password: "budi123", name: "Budi Santoso", email: "budi.santoso@outlook.com", whatsapp: "083456789012", applicantId: "ITB-2026-0003" },
-  { username: "indah", password: "indah123", name: "Indah Lestari", email: "indah.lestari@gmail.com", whatsapp: "084567890123", applicantId: "ITB-2026-0004" }
-];
+const DEFAULT_MABA_ACCOUNTS: any[] = [];
 
-const DEFAULT_CONTACTS = [
-  {
-    id: "contact-1",
-    name: "Rizky Pratama",
-    email: "rizky.pratama@gmail.com",
-    phone: "081234567891",
-    subject: "Kendala Pembayaran Virtual Account",
-    message: "Selamat siang Admin PMB ITB Trenggalek. Saya sudah mencoba membayar biaya pendaftaran melalui Virtual Account Bank BNI, namun status di dashboard pendaftaran saya masih pending. Mohon bantuan untuk memverifikasinya. Terima kasih.",
-    createdAt: "2026-07-11T09:15:00.000Z",
-    status: "Unread"
-  },
-  {
-    id: "contact-2",
-    name: "Dina Kartika",
-    email: "dina.kartika@yahoo.com",
-    phone: "085698765432",
-    subject: "Pertanyaan Batas Akhir Unggah Berkas",
-    message: "Halo, saya ingin bertanya untuk Gelombang III ini, batas akhir pengunggahan berkas administrasi seperti ijazah dan tanda tangan elektronik sampai tanggal berapa ya? Terima kasih banyak.",
-    createdAt: "2026-07-11T11:40:00.000Z",
-    status: "Responded"
-  }
-];
+const DEFAULT_CONTACTS: any[] = [];
 
 const DEFAULT_FAQS = [
   {
@@ -236,53 +153,9 @@ const DEFAULT_FAQS = [
   }
 ];
 
-// Helper to load or initialize DB
-function readDatabase() {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, "utf-8");
-      const data = JSON.parse(raw);
-      let updated = false;
-      if (!data.mabaAccounts) {
-        data.mabaAccounts = DEFAULT_MABA_ACCOUNTS;
-        updated = true;
-      }
-      if (!data.contacts) {
-        data.contacts = DEFAULT_CONTACTS;
-        updated = true;
-      }
-      if (!data.faqs) {
-        data.faqs = DEFAULT_FAQS;
-        updated = true;
-      }
-      if (updated) {
-        saveDatabase(data);
-      }
-      return data;
-    }
-  } catch (err) {
-    console.error("Error reading database file, resetting to default...", err);
-  }
-  
-  const initialData = { 
-    applicants: DEFAULT_APPLICANTS, 
-    notifications: DEFAULT_NOTIFICATIONS,
-    mabaAccounts: DEFAULT_MABA_ACCOUNTS,
-    contacts: DEFAULT_CONTACTS,
-    faqs: DEFAULT_FAQS
-  };
-  fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), "utf-8");
-  return initialData;
-}
+const DB_BACKUP_FILE = path.join(process.cwd(), "db.json.bak");
 
-// Helper to save to DB
-function saveDatabase(data: any) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
-  } catch (err) {
-    console.error("Error saving database file", err);
-  }
-}
+// Helper to load or initialize DB with robust backups and self-healing fallback
 
 // Lazy init Gemini AI
 let geminiAI: GoogleGenAI | null = null;
@@ -462,10 +335,93 @@ app.post("/api/admin/login", (req, res) => {
   }
 });
 
+// 0. Sync and Self-Heal Database Backup from Client
+app.post("/api/sync-backup", (req, res) => {
+  const db = readDatabase();
+  const { applicants, mabaAccounts } = req.body;
+
+  if (!applicants && !mabaAccounts) {
+    return res.status(400).json({ message: "Payload sinkronisasi kosong." });
+  }
+
+  let mergedCount = 0;
+  let accountCount = 0;
+
+  const STATUS_RANK: Record<string, number> = {
+    "Pending": 0,
+    "Registered": 1,
+    "Paid": 2,
+    "DocumentUploaded": 3,
+    "ExamCompleted": 4,
+    "Interview": 5,
+    "Graduated_Ilmu_Komputer": 6,
+    "Graduated_Bisnis_Digital": 6,
+    "Graduated_Manajemen_Ritel": 6,
+    "Rejected": 6
+  };
+
+  if (Array.isArray(applicants)) {
+    applicants.forEach((clientApp: any) => {
+      if (!clientApp || !clientApp.id) return;
+      
+      const serverAppIdx = db.applicants.findIndex((a: any) => a.id === clientApp.id);
+      if (serverAppIdx === -1) {
+        // Not on server - restore/insert!
+        db.applicants.push(clientApp);
+        mergedCount++;
+      } else {
+        // Compare status or progress
+        const serverApp = db.applicants[serverAppIdx];
+        const clientRank = STATUS_RANK[clientApp.status] || 0;
+        const serverRank = STATUS_RANK[serverApp.status] || 0;
+        
+        // If client record is further progressed or has documents/payment, merge/overwrite
+        if (clientRank > serverRank || (!serverApp.documents?.ijazah && clientApp.documents?.ijazah)) {
+          db.applicants[serverAppIdx] = { ...serverApp, ...clientApp };
+          mergedCount++;
+        }
+      }
+    });
+  }
+
+  if (Array.isArray(mabaAccounts)) {
+    mabaAccounts.forEach((clientAcc: any) => {
+      if (!clientAcc || !clientAcc.username) return;
+      
+      const exists = db.mabaAccounts.some((a: any) => a.username.toLowerCase() === clientAcc.username.toLowerCase());
+      if (!exists) {
+        db.mabaAccounts.push(clientAcc);
+        accountCount++;
+      }
+    });
+  }
+
+  if (mergedCount > 0 || accountCount > 0) {
+    console.log(`Database self-healed: synced ${mergedCount} applicants and ${accountCount} accounts from client.`);
+    saveDatabase(db);
+  }
+
+  res.json({
+    success: true,
+    syncedApplicants: mergedCount,
+    syncedAccounts: accountCount,
+    totalApplicants: db.applicants.length,
+    totalAccounts: db.mabaAccounts.length
+  });
+});
+
 // 1. Get all applicants
 app.get("/api/applicants", (req, res) => {
   const db = readDatabase();
-  res.json(db.applicants);
+  const applicantsWithAuth = db.applicants.map((app: any) => {
+    const acc = db.mabaAccounts.find((a: any) => a.applicantId === app.id);
+    return {
+      ...app,
+      mabaUsername: acc ? acc.username : null,
+      mabaPassword: acc ? acc.password : null
+    };
+  });
+  res.json(applicantsWithAuth);
 });
 
 // 2. Get single applicant by ID
@@ -475,7 +431,12 @@ app.get("/api/applicant/:id", (req, res) => {
   if (!applicant) {
     return res.status(404).json({ message: "Nomor Pendaftaran tidak ditemukan." });
   }
-  res.json(applicant);
+  const acc = db.mabaAccounts.find((a: any) => a.applicantId === applicant.id);
+  res.json({
+    ...applicant,
+    mabaUsername: acc ? acc.username : null,
+    mabaPassword: acc ? acc.password : null
+  });
 });
 
 // 3. Register a new applicant
@@ -1137,6 +1098,7 @@ app.post("/api/chat", async (req, res) => {
 
 // Setup Express and Vite Middleware
 async function startServer() {
+  await initFirestoreDb();
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

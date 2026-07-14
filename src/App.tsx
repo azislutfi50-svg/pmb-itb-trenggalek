@@ -225,18 +225,55 @@ export default function App() {
   const [successContactMsg, setSuccessContactMsg] = useState(false);
 
   // Fetch individual applicant by ID helper
-  const refreshApplicantData = async (id: string) => {
+  const refreshApplicantData = async (id: string, isRetry = false) => {
     try {
       const res = await fetch(`/api/applicant/${id}`);
       if (res.ok) {
         const data = await res.json();
         setCurrentApplicant(data);
+        
+        // Back up current applicant profile to localStorage
+        localStorage.setItem(`itb_pmb_backup_applicant_profile_${id}`, JSON.stringify(data));
+        if (mabaUser) {
+          localStorage.setItem(`itb_pmb_backup_maba_account_${mabaUser.username}`, JSON.stringify(mabaUser));
+        }
+
         // Sync uploaded files from db
         const files: Record<string, string> = {};
         if (data.documents?.ijazah) files.ijazah = data.documents.ijazah.name;
         if (data.documents?.ktp) files.ktp = data.documents.ktp.name;
         if (data.documents?.foto) files.foto = data.documents.foto.name;
         setUploadedFiles(files);
+      } else if (res.status === 404 && !isRetry) {
+        // Server returned 404 - let's check if we have local backup to self-heal!
+        console.log("Applicant not found on server (possibly due to database reset). Searching local backup to restore...");
+        const localAppStr = localStorage.getItem(`itb_pmb_backup_applicant_profile_${id}`);
+        const localAccStr = mabaUser ? localStorage.getItem(`itb_pmb_backup_maba_account_${mabaUser.username}`) : null;
+        
+        if (localAppStr) {
+          try {
+            const localApp = JSON.parse(localAppStr);
+            const localAcc = localAccStr ? JSON.parse(localAccStr) : null;
+            
+            console.log("Restoring local student backup to server...", localApp.id);
+            const syncRes = await fetch("/api/sync-backup", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                applicants: [localApp],
+                mabaAccounts: localAcc ? [localAcc] : []
+              })
+            });
+            
+            if (syncRes.ok) {
+              console.log("Self-healing restoration successful for student", id);
+              // Retry fetching the restored applicant data
+              refreshApplicantData(id, true);
+            }
+          } catch (err) {
+            console.error("Error restoring local student backup", err);
+          }
+        }
       }
     } catch (err) {
       console.error("Error refreshing applicant data:", err);
@@ -405,7 +442,71 @@ export default function App() {
     try {
       const res = await fetch("/api/applicants");
       if (res.ok) {
-        const data = await res.json();
+        let data = await res.json();
+
+        // --- Client-Side Self-Healing DB Backup & Sync ---
+        const localBackupStr = localStorage.getItem("itb_pmb_backup_all_applicants");
+        if (localBackupStr) {
+          try {
+            const localBackup = JSON.parse(localBackupStr) as Applicant[];
+            
+            // Check if there are any applicants in local backup that are missing or have higher progress on the server
+            const STATUS_RANK: Record<string, number> = {
+              "Pending": 0, "Registered": 1, "Paid": 2, "DocumentUploaded": 3,
+              "ExamCompleted": 4, "Interview": 5, "Graduated_Ilmu_Komputer": 6,
+              "Graduated_Bisnis_Digital": 6, "Graduated_Manajemen_Ritel": 6, "Rejected": 6
+            };
+            
+            const needsSync = localBackup.some(localApp => {
+              const serverApp = data.find((a: any) => a.id === localApp.id);
+              if (!serverApp) return true; // Missing on server!
+              const localRank = STATUS_RANK[localApp.status] || 0;
+              const serverRank = STATUS_RANK[serverApp.status] || 0;
+              return localRank > serverRank; // Further progressed locally!
+            });
+            
+            if (needsSync) {
+              console.log("Detecting missing or desynced database records on server. Triggering self-healing restoration...");
+              // Prepare mabaAccounts to sync if they have credentials in the backup
+              const syncAccounts = localBackup
+                .filter(app => app.mabaUsername && app.mabaPassword)
+                .map(app => ({
+                  username: app.mabaUsername,
+                  password: app.mabaPassword,
+                  name: app.name,
+                  email: app.email,
+                  whatsapp: app.whatsapp,
+                  applicantId: app.id
+                }));
+                
+              const syncRes = await fetch("/api/sync-backup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  applicants: localBackup,
+                  mabaAccounts: syncAccounts
+                })
+              });
+              
+              if (syncRes.ok) {
+                // Re-fetch clean data after successful sync
+                const refreshedRes = await fetch("/api/applicants");
+                if (refreshedRes.ok) {
+                  data = await refreshedRes.json();
+                  console.log("Database self-healing restoration succeeded!");
+                }
+              }
+            }
+          } catch (e) {
+            console.error("Failed to parse or sync local backup data", e);
+          }
+        }
+        
+        // Save current server data to local backup for future self-healing
+        if (data && data.length > 0) {
+          localStorage.setItem("itb_pmb_backup_all_applicants", JSON.stringify(data));
+        }
+
         setAdminApplicants(data);
         calculateStats(data);
         
@@ -841,6 +942,8 @@ export default function App() {
     const headers = [
       "No. ID Pendaftaran", 
       "Nama Calon Mahasiswa", 
+      "Username Maba",
+      "Password Maba",
       "Email", 
       "WhatsApp", 
       "Asal Sekolah", 
@@ -967,6 +1070,8 @@ export default function App() {
         <tr>
           <td class="text-center mso-num" style="font-weight: bold; color: #0284c7;">${app.id}</td>
           <td class="text-left" style="font-weight: 600; color: #0f172a;">${app.name}</td>
+          <td class="text-left font-mono">${app.mabaUsername || "-"}</td>
+          <td class="text-left font-mono">${app.mabaPassword || "-"}</td>
           <td class="text-left">${app.email}</td>
           <td class="text-center mso-num">${app.whatsapp}</td>
           <td class="text-left">${app.school}</td>
@@ -1604,7 +1709,7 @@ export default function App() {
                   ${committeeSignatureSvg}
                   ${officialStampHtml}
                 </div>
-                <div class="name">Drs. H. M. Sidik, M.B.A.</div>
+                <div class="name">A.N Teguh Sukanto SE MM</div>
                 <div class="nip">NIP. 19741021 200312 1 002</div>
               </div>
 
@@ -1721,7 +1826,7 @@ export default function App() {
                     ${committeeSignatureSvg}
                     ${officialStampHtml}
                   </div>
-                  <div class="name">Drs. H. M. Sidik, M.B.A.</div>
+                  <div class="name">A.N Teguh Sukanto SE MM</div>
                   <div class="nip">NIP. 19741021 200312 1 002</div>
                 </div>
               </div>
@@ -5339,7 +5444,7 @@ export default function App() {
                     <thead>
                       <tr className="border-b border-slate-800 text-slate-400 font-mono text-[10px] uppercase">
                         <th className="py-2.5 px-3">No. ID</th>
-                        <th className="py-2.5 px-3">Nama Lengkap & Sekolah</th>
+                        <th className="py-2.5 px-3">Nama, Sekolah & Akun Maba</th>
                         <th className="py-2.5 px-3">CBT Skor</th>
                         <th className="py-2.5 px-3">Bayar</th>
                         <th className="py-2.5 px-3">Status PMB</th>
@@ -5372,6 +5477,13 @@ export default function App() {
                             <td className="py-3 px-3">
                               <p className="font-semibold text-slate-100">{app.name}</p>
                               <p className="text-[10px] text-slate-500">{app.school}</p>
+                              {app.mabaUsername && (
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[10px] font-mono bg-slate-950/60 py-1 px-2 rounded border border-slate-800/40 w-fit">
+                                  <span className="text-slate-400">User: <strong className="text-emerald-400 select-all font-bold">{app.mabaUsername}</strong></span>
+                                  <span className="text-slate-600 hidden xs:inline">|</span>
+                                  <span className="text-slate-400">Pass: <strong className="text-amber-400 select-all font-bold">{app.mabaPassword}</strong></span>
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-3 font-mono font-bold">
                               {app.exam?.score !== undefined ? `${app.exam.score}/100` : "-"}
@@ -5434,6 +5546,28 @@ export default function App() {
                       </button>
                     </div>
 
+                    {/* Maba Account Details */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner">
+                      <div className="flex items-center gap-1.5 text-sky-400">
+                        <Key className="w-3.5 h-3.5" />
+                        <span className="text-[10px] uppercase tracking-wider font-mono font-bold">Kredensial Akun Portal Maba</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="bg-slate-900 border border-slate-850 p-2.5 rounded-xl space-y-0.5">
+                          <span className="text-slate-500 text-[10px] font-mono block">Username</span>
+                          <span className="text-emerald-400 font-bold select-all font-mono break-all block">
+                            {selectedAdminApplicant.mabaUsername || "Belum ada akun"}
+                          </span>
+                        </div>
+                        <div className="bg-slate-900 border border-slate-850 p-2.5 rounded-xl space-y-0.5">
+                          <span className="text-slate-500 text-[10px] font-mono block">Password</span>
+                          <span className="text-amber-400 font-bold select-all font-mono break-all block">
+                            {selectedAdminApplicant.mabaPassword || "Belum ada akun"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Basic Info */}
                     <div className="grid grid-cols-2 gap-3 text-[11px]">
                       <div>
@@ -5455,12 +5589,22 @@ export default function App() {
                         <div className="flex items-center justify-between p-2 rounded border bg-slate-950 border-slate-800">
                           <span className="text-slate-400">📄 Ijazah/SKL</span>
                           {selectedAdminApplicant.documents?.ijazah ? (
-                            <button
-                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "ijazah")}
-                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
-                            >
-                              Unduh ({selectedAdminApplicant.documents.ijazah.size})
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <a
+                                href={`/api/document-view?id=${encodeURIComponent(selectedAdminApplicant.id)}&type=ijazah`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                              >
+                                Lihat
+                              </a>
+                              <button
+                                onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "ijazah")}
+                                className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                              >
+                                Unduh ({selectedAdminApplicant.documents.ijazah.size})
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-slate-600 italic">Belum diunggah</span>
                           )}
@@ -5470,12 +5614,22 @@ export default function App() {
                         <div className="flex items-center justify-between p-2 rounded border bg-slate-950 border-slate-800">
                           <span className="text-slate-400">📄 KTP/KK</span>
                           {selectedAdminApplicant.documents?.ktp ? (
-                            <button
-                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "ktp")}
-                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
-                            >
-                              Unduh ({selectedAdminApplicant.documents.ktp.size})
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <a
+                                href={`/api/document-view?id=${encodeURIComponent(selectedAdminApplicant.id)}&type=ktp`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                              >
+                                Lihat
+                              </a>
+                              <button
+                                onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "ktp")}
+                                className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                              >
+                                Unduh ({selectedAdminApplicant.documents.ktp.size})
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-slate-600 italic">Belum diunggah</span>
                           )}
@@ -5485,12 +5639,22 @@ export default function App() {
                         <div className="flex items-center justify-between p-2 rounded border bg-slate-950 border-slate-800">
                           <span className="text-slate-400">🖼 Pasfoto 3x4</span>
                           {selectedAdminApplicant.documents?.foto ? (
-                            <button
-                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "foto")}
-                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
-                            >
-                              Unduh ({selectedAdminApplicant.documents.foto.size})
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <a
+                                href={`/api/document-view?id=${encodeURIComponent(selectedAdminApplicant.id)}&type=foto`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                              >
+                                Lihat
+                              </a>
+                              <button
+                                onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "foto")}
+                                className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                              >
+                                Unduh ({selectedAdminApplicant.documents.foto.size})
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-slate-600 italic">Belum diunggah</span>
                           )}
@@ -5500,12 +5664,22 @@ export default function App() {
                         {selectedAdminApplicant.payment.buktiBayar && (
                           <div className="flex items-center justify-between p-2 rounded border bg-emerald-950/20 border-emerald-900/50 text-emerald-400">
                             <span>💸 Bukti Bayar PDF</span>
-                            <button
-                              onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "bukti_bayar")}
-                              className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
-                            >
-                              Unduh ({selectedAdminApplicant.payment.buktiBayar.size})
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <a
+                                href={`/api/document-view?id=${encodeURIComponent(selectedAdminApplicant.id)}&type=bukti_bayar`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                              >
+                                Lihat
+                              </a>
+                              <button
+                                onClick={() => handleDownloadApplicantFile(selectedAdminApplicant, "bukti_bayar")}
+                                className="text-sky-400 hover:text-sky-300 font-bold hover:underline cursor-pointer"
+                              >
+                                Unduh ({selectedAdminApplicant.payment.buktiBayar.size})
+                              </button>
+                            </div>
                           </div>
                         )}
 
